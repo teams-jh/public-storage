@@ -14,13 +14,15 @@ const userEmail = "vvv3334@hanmail.net";
 const token = process.env.GH_TOKEN;
 // ====================================================
 
-const getSHA = async (octokit, path) => {
-  const response = await octokit.request(
-    `GET /repos/${owner}/${repo}/contents/${path}`
-  );
-
+async function getSHA(path) {
+  // 예외 처리가 없으면 404 발생 시 그대로 스크립트가 중단됨
+  const response = await octokit.rest.repos.getContent({
+    owner: 'team-jh',
+    repo: 'public-storage',
+    path: path,
+  });
   return response.data.sha;
-};
+}
 
 const githubWrite = async (path, contents, commitMessage) => {
   const octokit = new Octokit({
