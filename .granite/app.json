@@ -1,0 +1,13 @@
+{
+  "appName": "lotto-viewer-mobile",
+  "permissions": [
+    {
+      "name": "clipboard",
+      "access": "read"
+    },
+    {
+      "name": "clipboard",
+      "access": "write"
+    }
+  ]
+}

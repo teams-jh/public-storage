@@ -1,0 +1,80 @@
+name: Weekly Update Lotto
+
+on:
+  schedule:
+    - cron: "45 11 * * 6"   # 20:45 KST
+    - cron: "0 12 * * 6"    # 21:00 KST
+    - cron: "15 12 * * 6"   # 21:15 KST
+    - cron: "30 12 * * 6"   # 21:30 KST
+    - cron: "45 12 * * 6"   # 21:45 KST
+    - cron: "0 13 * * 6"    # 22:00 KST
+    - cron: "30 13 * * 6"    # 22:30 KST
+    - cron: "45 13 * * 6"    # 22:45 KST
+    - cron: "5 14 * * 6"    # 23:05 KST
+  workflow_dispatch: # 수동 실행도 가능하게 (선택)
+
+jobs:
+  update-lotto:
+    runs-on: ubuntu-latest
+
+    env:
+      GH_TOKEN: ${{ secrets.MY_TOKEN }}
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.MY_TOKEN }}
+
+    - name: Set Up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Dependencies
+      run: |
+        npm install axios --legacy-peer-deps
+        npm install @octokit/rest@20.0.2 --legacy-peer-deps
+        npm install node-fetch@2 --legacy-peer-deps
+
+    - name: Run Node.js Script
+      id: run_script
+      run: node server/weekly_lotto_action.js
+
+    - name: Update version.md with current date
+      if: steps.run_script.outputs.status == 'success'
+      run: |
+        TODAY=$(TZ=Asia/Seoul date +"%Y-%m-%d %H:%M:%S KST")
+        echo "Last Update: $TODAY" > version.md
+
+    - name: Sleep before commit & push
+      if: steps.run_script.outputs.status == 'success'
+      run: sleep 100
+
+    - name: Commit and Push changes
+      if: steps.run_script.outputs.status == 'success'
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+        # 혹시 모를 로컬 변경 초기화 (가장 중요!)
+        git reset --hard HEAD
+        git clean -fd
+
+        # 최신 리모트 내용 가져오기 (충돌 방지)
+        git pull --rebase origin main
+
+        # version.md 다시 반영
+        TODAY=$(TZ=Asia/Seoul date +"%Y-%m-%d %H:%M:%S KST")
+        echo "Last Update: $TODAY" > version.md
+
+        git add version.md
+
+        if ! git diff --cached --quiet; then
+          git commit -m "Update version.md on $TODAY"
+          git push https://x-access-token:${{ secrets.MY_TOKEN }}@github.com/${{ github.repository }}.git
+        else
+          echo "No changes to commit"
+        fi
+
+

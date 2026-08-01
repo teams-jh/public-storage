@@ -1,0 +1,197 @@
+
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <script>
+	    document.addEventListener("DOMContentLoaded", function() {
+	    	// 요일 세팅 하기(간소화 페이지)
+	    	var dayArr = ['월', '화', '수', '목', '금', '토', '일'];
+	    	var smarMainBgngDow = "토요일".substring(0, 1);
+	    	var smarMainBgngDowNo = "6";
+	    	var smarMainEndDowNo = "6";
+	    	for(var i=smarMainBgngDowNo ; i<smarMainEndDowNo ; i++) {
+	    		smarMainBgngDow += '·' + dayArr[i];
+	    	}
+	    	document.querySelectorAll('.smarMainDay').forEach(function(el) {
+    		    el.innerText = smarMainBgngDow + '요일';
+            });
+	    	
+	    	// 요일 세팅 하기(모바일 구매 제한)
+            var mobPrchsItrpBgngDow = "토요일".substring(0, 1);
+            var mobPrchsItrpBgngDowNo = "6";
+            var mobPrchsItrpEndDowNo = "7";
+            for(var i=mobPrchsItrpBgngDowNo ; i<mobPrchsItrpEndDowNo ; i++) {
+            	mobPrchsItrpBgngDow += '·' + dayArr[i];
+            }
+            document.querySelectorAll('.prchsDay').forEach(function(el) {
+                el.innerText = mobPrchsItrpBgngDow + '요일';
+            });
+	    	
+	    	// 모바일 구매 금지 시간에 따른 로그인 버튼 처리
+	    	var isPrchs = "1"; // 1: 모바일 구매 금지
+	    	var mobile = /iPhone|iPad|Android|BlackBerry|Windows Phone/i.test(navigator.userAgent);
+	    	var ipad = false;
+	        //if(navigator.maxTouchPoints >= 5) {
+	        //    ipad = true;
+	        //}
+	        if(isPrchs == "1" && (mobile || ipad)) {
+	        	document.querySelectorAll('.lt-btn-login').forEach(function(el) {
+	        		el.classList.add('none');
+	        	});
+	        } else {
+	        	document.querySelectorAll('.ment').forEach(function(el) {
+	        		el.classList.add('none');
+	        	});
+	        }
+	        
+	        // 모바일 구매 불가 시간 도달 시 reload(로또 로그인 버튼 삭제)
+	        if(isPrchs == "0") {
+		        var chkTime = setInterval(() => {
+		        	var today = new Date();
+			        var hh = String(today.getHours()).padStart(2, '0');
+			        var mm = String(today.getMinutes()).padStart(2, '0');
+			        var ss = String(today.getSeconds()).padStart(2, '0');
+			        
+			        var mobPrchsItrpBgngTm = "0000" + "00";
+			        
+			        if("" == ""
+			        		&& hh+mm+ss == mobPrchsItrpBgngTm) {
+			        	location.href = "/main";
+			        }
+		        }, 1000);
+	        }
+	    });
+    </script>
+    <link rel="stylesheet" href="/resources/css/smar-page.css">
+    <title>간소화페이지</title>
+</head>
+<body>
+    <header id="header">
+        <h1 id="logo">
+            <img src="/resources/img/main_img/img-smar-logo.svg" alt="동행복권" />
+        </h1>
+        <div class="desc">
+            <p class="st02">현재는 원활한 서비스 제공을 위해 <span>간소화 페이지를 운영 중</span>입니다.</p>
+            <div class="desc-dtl">
+                <p><span class="warning">주말(토요일, 일요일)은 로또를 모바일로 구매할 수 없습니다.</span></p> 
+                <p class="st02">(단, PC는 인터넷 로또 판매한도까지 구매가능합니다.)</p>
+            </div>
+            
+        </div>
+    </header>
+    <section id="main" class="wrap">
+        <div class="main-container">
+            <div class="desc" aria-hidden="true">
+                <p>현재는 원활한 서비스 제공을 위해 <span class="mo-br"></span><span>간소화 페이지를 운영 중</span>입니다.</p>
+            </div>
+            <div class="lotto-wrap">
+                <div class="symbol">
+                    <img src="/resources/img/main_img/img-smar-symbol_01.svg"  alt="" aria-hidden="true" />
+                    <h2 class="tit">Lotto 6/45</h2>
+                </div>
+                
+                    <button class="btn-login lt-btn-login" onclick="javascript:location.href='/smarPageNewCheck';">로그인</button>
+                
+                
+                <!-- 모바일 구매중단 시간일 때 모바일에서만 노출 -->
+                <div class="ment">
+                    <p class="warning"><span class="prchsDay"></span>에는 모바일 구매가 제한됩니다.</p>
+                    <p>※ PC에서는 인터넷 로또 판매한도까지 구매가능합니다.</p>
+                </div>
+            </div>
+            <div class="etc-wrap">
+                <div class="symbol">
+                    <img src="/resources/img/main_img/img-smar-symbol_02.svg" alt="" aria-hidden="true" />
+                    <h2 class="tit">연금복권720+, 전자복권</h2>
+                </div>
+                
+                    <button class="btn-login pt-btn-login" onclick="javascript:location.href='/smarPageNewCheck';">로그인</button>
+                
+                
+            </div>
+            <div class="favorite">
+                <h2 class="tit">많이 찾는 서비스</h2>
+                <ul class="link-wrap">
+                    <li>
+                        <a href="/prchsplcsrch/home">가까운 판매점 찾기</a>
+                    </li>
+                    <li>
+                        <a href="/wnprchsplcsrch/home">당첨 판매점 안내</a>
+                    </li>
+                    <li>
+                        <a href="/lt645/result">로또6/45 추첨결과</a>
+                    </li>
+                    <li>
+                        <a href="/pt720/result">연금복권720+ 추첨결과</a>
+                    </li>
+                    <li>
+                        <a href="/hpns/noticeListView">공지사항</a>
+                    </li>
+                </ul>
+                <div class="tel-wrap">
+                    <p class="tel">전화문의<span>1588-6450</span></p>
+                    <div class="day">
+                        <p>월~금, 일요일 06:00~24:00</p>
+                        <p>토요일 06:00~21:00</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <footer id="footer">
+        <div class="f-gnb-wrap">
+            <div class="logo-info-wrap">
+                <p class="f-logo">
+                    <img src="/resources/img/main_img/img-smar-logo.svg" alt="동행복권" />
+                </p>
+                <div class="business-info-m"><button type="button" aria-label="모바일용 사업자정보확인">사업자정보확인</button></div>
+            </div>
+            <nav id="f-gnb" aria-label="푸터 내비게이션">
+                <ul class="f-gnb-list">
+                    <li>
+                        <a href="/trms/home">사이트 이용약관</a>
+                    </li>
+                    <li>
+                        <a href="/prvcplcy/home">개인정보처리방침</a>
+                    </li>
+                    <li>
+                        <a href="javascript:goPaymentStandard()">인쇄복권 당첨금 지급 기준</a>
+                    </li>
+                    <li>
+                        <a href="/hpns/ltFdFdView" target="_blank">복권 및 복권기금법</a>
+                    </li>
+                    <li>
+                        <a href="https://clean.dhlottery.co.kr" target="_blank">동행클린센터</a>
+                    </li>
+                    <li>
+                        <a href="https://clean.dhlottery.co.kr/accusation/accusationInsert.do?acc_kind=A" target="_blank">불법 사행행위 신고</a>
+                    </li>
+                </ul>
+            </nav>
+            <div>
+                <ul class="f-info-box">
+                    <li>수탁사업자 (주)동행복권</li>
+                    <li>주소 : 06719 서울 서초구 남부순환로 2423 한원빌딩 4층</li>
+                    <li>고객문의 1588-6450</li>
+                    <li>FAX 02-6933-3063</li>
+                    <li>대표자 : 홍덕기</li>
+                    <li>사업자등록번호 866-87-00833</li>
+                    <li>통신판매사업자번호 : 제2018 - 서울서초 - 2075호</li>
+                    <li class="business-info"><button type="button" aria-label="PC용 사업자정보확인">사업자정보확인</button></li>
+                </ul>
+                <div class="f-copyright">
+                    <div>
+                        <p>본 홈페이지는 게시된 이메일 주소가 자동 수집되는 것을 거부하며,이를 위반시 정보통신망법에 의해 처벌됨을 유념하여 주시길 바랍니다.</p>
+                        <p>19세 미만일 경우 「복권 및 복권기금법」에 따라 복권을 구매할 수 없습니다.</p>
+                    </div>
+                    <p class="f-copy-txt">Copyright (c) 2018 복권위원회&동행복권. All rights reserved</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

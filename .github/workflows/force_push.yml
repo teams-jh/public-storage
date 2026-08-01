@@ -1,0 +1,54 @@
+name: Force Push
+
+on:
+  schedule:
+    - cron: "0 14 * * 6"    # 23:00 KST
+  workflow_dispatch: # 수동 실행도 가능하게 (선택)
+
+jobs:
+  update-lotto:
+    runs-on: ubuntu-latest
+
+    env:
+      GH_TOKEN: ${{ secrets.MY_TOKEN }}
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.MY_TOKEN }}
+
+    - name: Update version.md with current date
+      run: |
+        TODAY=$(TZ=Asia/Seoul date +"%Y-%m-%d %H:%M:%S KST")
+        echo "Last Update: $TODAY" > version.md
+
+    - name: Sleep before commit & push
+      run: sleep 100
+
+    - name: Commit and Push changes
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+        # 혹시 모를 로컬 변경 초기화 (가장 중요!)
+        git reset --hard HEAD
+        git clean -fd
+
+        # 최신 리모트 내용 가져오기 (충돌 방지)
+        git pull --rebase origin main
+
+        # version.md 다시 반영
+        TODAY=$(TZ=Asia/Seoul date +"%Y-%m-%d %H:%M:%S KST")
+        echo "Last Update: $TODAY" > version.md
+
+        git add version.md
+
+        if ! git diff --cached --quiet; then
+          git commit -m "Update version.md on $TODAY"
+          git push https://x-access-token:${{ secrets.MY_TOKEN }}@github.com/${{ github.repository }}.git
+        else
+          echo "No changes to commit"
+        fi
+
+
