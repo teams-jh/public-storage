@@ -8,7 +8,7 @@ const { Octokit } = require("@octokit/core");
 
 // === 수정된 부분: Organization 및 Repository 설정 ===
 const owner = "team-jh";
-const repo = "lotto-viewer-mobile";
+const repo = "public-storage";
 const committerName = "bloodstrawberry";
 const userEmail = "vvv3334@hanmail.net";
 const token = process.env.GH_TOKEN;
