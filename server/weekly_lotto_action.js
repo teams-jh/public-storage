@@ -12,8 +12,9 @@ try {
 }
 
 // === 수정된 부분: Organization 및 Repository 설정 ===
-const owner = "team-jh";
-const repo = "public-storage";
+const [envOwner, envRepo] = (process.env.GITHUB_REPOSITORY || "teams-jh/public-storage").split("/");
+const owner = envOwner;
+const repo = envRepo;
 const committerName = "bloodstrawberry";
 const userEmail = "vvv3334@hanmail.net";
 const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || process.env.MY_TOKEN;
