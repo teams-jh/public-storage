@@ -4,27 +4,40 @@ const axios = require("axios");
 const fetch = require("node-fetch");
 const { parseLottoLog } = require("./lotto_html_parser");
 
-const { Octokit } = require("@octokit/core");
+let Octokit;
+try {
+  Octokit = require("@octokit/rest").Octokit;
+} catch (e) {
+  Octokit = require("@octokit/core").Octokit;
+}
 
 // === 수정된 부분: Organization 및 Repository 설정 ===
 const owner = "team-jh";
 const repo = "public-storage";
 const committerName = "bloodstrawberry";
 const userEmail = "vvv3334@hanmail.net";
-const token = process.env.GH_TOKEN;
+const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || process.env.MY_TOKEN;
 // ====================================================
 
-async function getSHA(path) {
-  // 예외 처리가 없으면 404 발생 시 그대로 스크립트가 중단됨
-  const response = await octokit.rest.repos.getContent({
-    owner: 'team-jh',
-    repo: 'public-storage',
-    path: path,
-  });
-  return response.data.sha;
+async function getSHA(octokit, path) {
+  try {
+    const response = await octokit.request(
+      `GET /repos/${owner}/${repo}/contents/${path}`
+    );
+    return response.data.sha;
+  } catch (error) {
+    if (error.status === 404) {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 const githubWrite = async (path, contents, commitMessage) => {
+  if (!token) {
+    console.error("GitHub token is not defined. Please check GH_TOKEN or GITHUB_TOKEN environment variable.");
+  }
+
   const octokit = new Octokit({
     auth: token,
     request: {
@@ -34,20 +47,23 @@ const githubWrite = async (path, contents, commitMessage) => {
 
   const fileSHA = await getSHA(octokit, path);
 
+  const payload = {
+    message: commitMessage,
+    committer: {
+      name: committerName,
+      email: userEmail,
+    },
+    // Node.js 표준 Base64 인코딩 (한글 및 유니코드 처리 지원)
+    content: Buffer.from(`${contents}`, "utf-8").toString("base64"),
+  };
+
+  if (fileSHA) {
+    payload.sha = fileSHA;
+  }
+
   const response = await octokit.request(
     `PUT /repos/${owner}/${repo}/contents/${path}`,
-    {
-      sha: fileSHA,
-      message: commitMessage,
-      committer: {
-        name: committerName,
-        email: userEmail,
-      },
-
-      // btoa : 바이너리 데이터를 base64로 인코딩
-      // unescape(encodeURIComponent(())) <- 한글 처리
-      content: btoa(unescape(encodeURIComponent(`${contents}`))),
-    }
+    payload
   );
 
   console.log("githubWrite", path, response.status);
@@ -188,6 +204,7 @@ const updateLottoJson = async (targetDateStr) => {
     console.log("Update complete.");
   } catch (error) {
     console.error("Error updating lotto json:", error);
+    process.exitCode = 1;
   }
 };
 
