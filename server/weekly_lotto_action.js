@@ -140,6 +140,7 @@ function transformLottoItem(item) {
 
 const updateLottoJson = async (targetDateStr) => {
   const filePath = path.join(__dirname, "../json/lottoNumber.json");
+  const compactFilePath = path.join(__dirname, "../json/compactLottoNumber.json");
 
   console.log("filePath :", filePath);
 
@@ -149,6 +150,20 @@ const updateLottoJson = async (targetDateStr) => {
     const lastEntry = lottoJson[lottoJson.length - 1];
     const lastDrwNo = lastEntry ? lastEntry.drwNo : 0;
     let isNewRoundAdded = false;
+
+    // compactLottoNumber.json 기존 파일 읽기 (사용자가 삭제한 과거 내역 유지)
+    let compactLottoJson = [];
+    if (fs.existsSync(compactFilePath)) {
+      try {
+        compactLottoJson = JSON.parse(fs.readFileSync(compactFilePath, "utf-8"));
+      } catch (e) {
+        compactLottoJson = [];
+      }
+    }
+
+    if (!Array.isArray(compactLottoJson) || compactLottoJson.length === 0) {
+      compactLottoJson = lottoJson.map(transformLottoItem);
+    }
     
     const targetDate = targetDateStr ? new Date(targetDateStr) : new Date();
     const targetRound = getLottoRound(targetDate);
@@ -164,25 +179,41 @@ const updateLottoJson = async (targetDateStr) => {
         console.log({ parsedData });
         // drwNo1이 0이 아닌 경우에만 처리
         if (parsedData && parsedData.returnValue === 'success' && parsedData.drwtNo1 !== 0) {
+             const compactItem = transformLottoItem(parsedData);
+
              if (parsedData.drwNo > lastDrwNo) {
                  console.log(`New round ${parsedData.drwNo} found from HTML Parser. Appending.`);
                  lottoJson.push(parsedData);
                  isNewRoundAdded = true;
+
+                 // compactLottoJson에도 신규 날짜 항목만 추가
+                 const existingIndex = compactLottoJson.findIndex(item => item.drwNoDate === compactItem.drwNoDate);
+                 if (existingIndex !== -1) {
+                     compactLottoJson[existingIndex] = compactItem;
+                 } else {
+                     compactLottoJson.push(compactItem);
+                 }
              } else {
                  const existingIndex = lottoJson.findIndex(item => item.drwNo === parsedData.drwNo);
                  if (existingIndex !== -1) {
                     lottoJson[existingIndex] = parsedData;
                     console.log(`Updated round ${parsedData.drwNo} from HTML Parser`);
+
+                    const compactIndex = compactLottoJson.findIndex(item => item.drwNoDate === compactItem.drwNoDate);
+                    if (compactIndex !== -1) {
+                      compactLottoJson[compactIndex] = compactItem;
+                    }
                  }
              }
         }
     }
 
-    // fs.writeFileSync(filePath, JSON.stringify(lottoJson, null, 4));
-
     const updatedJson = JSON.stringify(lottoJson, null, 2);
-    const compactLottoJson = lottoJson.map(transformLottoItem);
     const updatedCompactJson = JSON.stringify(compactLottoJson, null, 2);
+
+    // 로컬 파일 쓰기
+    fs.writeFileSync(filePath, updatedJson, "utf-8");
+    fs.writeFileSync(compactFilePath, updatedCompactJson, "utf-8");
     
     const today = new Date();
     const formatted = today.toISOString().split("T")[0];
