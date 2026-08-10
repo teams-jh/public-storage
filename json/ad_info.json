@@ -1,0 +1,20 @@
+[
+  {
+    "id": "space-shooter",
+    "title": "은하계 방위대",
+    "subtitle": "외계인의 침공으로부터 지구를 지켜라!",
+    "logoImage": "/personal-ad/space-shooter.png",
+    "linkUrl": "space-shooter",
+    "buttonText": "출격하기",
+    "theme": "slate"
+  },
+  {
+    "id": "typing-hero",
+    "title": "타자 히어로",
+    "subtitle": "당신의 진짜 타자 속도는?",
+    "logoImage": "/personal-ad/typing-hero.png",
+    "linkUrl": "typing-hero",
+    "buttonText": "측정하기",
+    "theme": "teal"
+  }
+]
