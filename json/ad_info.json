@@ -1,5 +1,14 @@
 [
   {
+    "id": "icecream-311",
+    "title": "똑똑한 아이스크림 311",
+    "subtitle": "AI와 함께하는 심리전!!!",
+    "logoImage": "/personal-ad/icecream-311.png",
+    "linkUrl": "icecream-311",
+    "buttonText": "플레이",
+    "theme": "purple"
+  },
+  {
     "id": "space-shooter",
     "title": "은하계 방위대",
     "subtitle": "외계인의 침공으로부터 지구를 지켜라!",
