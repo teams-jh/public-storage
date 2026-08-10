@@ -16,5 +16,14 @@
     "linkUrl": "typing-hero",
     "buttonText": "측정하기",
     "theme": "teal"
+  },
+  {
+    id: "icecream-31",
+    title: "똑똑한 아이스크림 31",
+    subtitle: "AI와 함께하는 심리전!",
+    logoImage: "/personal-ad/icecream-31.png",
+    linkUrl: "icecream-31",
+    buttonText: "플레이",
+    theme: "purple",
   }
 ]
