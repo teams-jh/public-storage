@@ -1,5 +1,32 @@
 [
   {
+    "id": "lotto-viewer-mobile",
+    "title": "로또 패턴 통계 분석ㅋ",
+    "subtitle": "로또 1등에 당첨되려면?",
+    "logoImage": "/personal-ad/lotto-viewer-mobile.png",
+    "linkUrl": "lotto-viewer-mobile",
+    "buttonText": "분석하기",
+    "theme": "green"
+  },
+  {
+    "id": "multi-touch-dice",
+    "title": "손가락 추첨 눈치게임 콕ㅋ",
+    "subtitle": "커피내기? 순서 정하기?",
+    "logoImage": "/personal-ad/multi-touch-dice.png",
+    "linkUrl": "multi-touch-dice",
+    "buttonText": "누르기",
+    "theme": "orange"
+  },
+  {
+    "id": "pi-master",
+    "title": "원주율 DANS 파이ㅋ",
+    "subtitle": "원주율 외워봤어?",
+    "logoImage": "/personal-ad/pi-master.png",
+    "linkUrl": "pi-master",
+    "buttonText": "도전하기",
+    "theme": "빨강"
+  },
+  {
     "id": "icecream-311",
     "title": "똑똑한 아이스크림 311",
     "subtitle": "AI와 함께하는 심리전!!!",
