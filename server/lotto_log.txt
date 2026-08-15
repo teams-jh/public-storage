@@ -12,7 +12,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="ko" xml:lang="ko">
 
 <script type="text/javascript">
-	var rsaModulus = '8711df3cec04b5c0e2815b7ee1a1596f0e417387a60cc48bbae34d1db5fb198971a32b14cffa0bc6c71557bed15b5d664d2a58bca536992e30ff649052f6f04d971f319ecf9e0cf0c4d56e814055c8fc013df502f82d42c059d14fb41d9e1be685579539b1e4963f80e98d7c36c3a8407ec8cdeeb9b0a6cc72cb29a8139e162fc8a701d9ae065e4345f58fa68c164df86aa063e32b6bb1d19636af78ac74cfb349624841d72919fce3b3c01b86edd7677d488edf163ca98f16abfc7c9794146b50254a1f946aefdc0eebb8a8aeb6b68aad057c7e00c56562fae042b8c26878afb279328aa8ccd1a738eb0cb2d170d9055f397feb6d2eaeb1d05125c322527c1f';
+	var rsaModulus = 'cfdc8ca7d0dade0623430990e69d75971077e204cc20d996cfeea7f93db3a14499e6c0b10540f4b1ae05845a3a70ff5c864194cce7ca26bfbf83afe0913cf70da7e65e95783e6d34205ee7f6ad464f710c5c8d45612e3a0ecdbd16ee0932ff728e38f9ac40421857d802d86bb71b582cbfe5af3acd52da9cdf52a0127294cc2c36ccae22ee71d9d59e61c88ff4c1c61348130e72ce1b9e53e6cf67d8d47982cb12d1efe3c885c6f4a46f6bc7be07c16c323e011e48c5375f06784f5401fa9a212430569a16f23c63dc7c774390c7c920eca93b7bcdb5fc89a008d3e2ba9d82da6d9ae1110591f38f80836765df552af6ffa4de3373f696566016283c4113e0ab';
 	var publicExponent = '10001';
 	
 	const layoutsL = {
@@ -116,8 +116,8 @@
 			var host="www.dhlottery.co.kr";
 			var port="443";
 			var pageUrl = window.location.pathname.substr(1);	// 현재 페이지 정보
-			var ip ='13.83.166.242';							// 클라이언트 IP
-			var loginId ='13.83.166.242';						// 클라이언트 IP 또는 로그인 ID
+			var ip ='20.163.246.215';							// 클라이언트 IP
+			var loginId ='20.163.246.215';						// 클라이언트 IP 또는 로그인 ID
 			
 			if(pageUrl === undefined || pageUrl == null || pageUrl == "") {
 				pageUrl = 'main';
@@ -131,8 +131,8 @@
 			var host="www.dhlottery.co.kr";
 			var port="443";
 			var pageUrl=window.location.pathname.substr(1);	// 현재 페이지 정보
-			var ip ='13.83.166.242';        				// 클라이언트 IP
-			var loginId ='13.83.166.242';   				// 클라이언트 IP 또는 로그인 ID
+			var ip ='20.163.246.215';        				// 클라이언트 IP
+			var loginId ='20.163.246.215';   				// 클라이언트 IP 또는 로그인 ID
 			
 			if(pageUrl === undefined || pageUrl == null || pageUrl == "") {
 				pageUrl = 'main';
@@ -2327,6 +2327,22 @@ const topL = {
                 </div>
                 <div class="result-ballWrapper">
                     
+                    <div class="view-winner bg-gray">
+                        <div class="desc-wrap">
+                            <span class="txt-rank">1등</span>
+                            <span class="txt-price">
+                                <span id="rnk1SumWnAmtTop">
+                                    27,943,451,640
+                                </span>원
+                            </span>
+                            <span class="txt-total">총
+                                <span id="rnk1WnNopeTop">
+                                    23
+                                </span>게임 당첨
+                            </span>
+                        </div>
+                    </div>
+                    
                     <div class="result-ballBox">
                         <div class="result-ball num-0n">
                             10
@@ -2363,6 +2379,185 @@ const topL = {
             </div>
             
             
+            
+            <!-- 이번회차 당첨결과 -->
+            <div class="table-wrap smar-table3">
+                <div class="title-wrap">
+                    <span class="txt-title">이번회차 당첨결과</span>
+                </div>
+                <div class="table-content"><!-- 수정 myPage-tbl02-wrap >> table-content -->
+                    <!-- PC용 -->
+                    <div class="drawResult-tbl">
+                        <div class="tbl-tr thead">
+                            <div class="tbl-td td-rank">순위</div>
+                            <div class="tbl-td td-money">등위별 총 당첨금</div>
+                            <div class="tbl-td td-game">당첨게임 수</div>
+                            <div class="tbl-td td-perMoney">1게임당 당첨금</div>
+                            <div class="tbl-td td-standard">당첨기준</div>
+                            <div class="tbl-td td-etc">비고</div>
+                        </div>
+                        <div class="tbl-tbodyWrap">
+                            <div class="tbody-tr">
+                                <div class="tbl-tr">
+                                    <div class="tbl-td td-rank">1등</div>
+                                    <div class="tbl-td td-money rnk1SumWnAmt">27,943,451,640</div>
+                                    <div class="tbl-td td-game rnk1WnNope">23</div>
+                                    <div class="tbl-td td-perMoney rnk1WnAmt">1,214,932,680</div>
+                                    <div class="tbl-td td-standard"><span class="color-g">6개</span>번호 일치</div>
+                                </div>
+                                <div class="tbl-tr">
+                                    <div class="tbl-td td-rank">2등</div>
+                                    <div class="tbl-td td-money rnk2SumWnAmt">4,657,242,000</div>
+                                    <div class="tbl-td td-game rnk2WnNope">75</div>
+                                    <div class="tbl-td td-perMoney rnk2WnAmt">62,096,560</div>
+                                    <div class="tbl-td td-standard">
+                                        <span class="color-g">5개</span>번호 일치 + <span class="color-g">보너스</span>번호 일치 
+                                    </div>
+                                </div>
+                                <div class="tbl-tr">
+                                    <div class="tbl-td td-rank">3등</div>
+                                    <div class="tbl-td td-money rnk3SumWnAmt">4,657,244,550</div>
+                                    <div class="tbl-td td-game rnk3WnNope">3,745</div>
+                                    <div class="tbl-td td-perMoney rnk3WnAmt">1,243,590</div>
+                                    <div class="tbl-td td-standard">
+                                        <span class="color-g">5개</span>번호 일치
+                                    </div>
+                                </div>
+                                <div class="tbl-tr">
+                                    <div class="tbl-td td-rank">4등</div>
+                                    <div class="tbl-td td-money rnk4SumWnAmt">8,606,600,000</div>
+                                    <div class="tbl-td td-game rnk4WnNope">172,132</div>
+                                    <div class="tbl-td td-perMoney rnk4WnAmt">50,000</div>
+                                    <div class="tbl-td td-standard"><span class="color-g">4개</span>번호 일치</div>
+                                </div>
+                                <div class="tbl-tr">
+                                    <div class="tbl-td td-rank">5등</div>
+                                    <div class="tbl-td td-money rnk5SumWnAmt">13,317,045,000</div>
+                                    <div class="tbl-td td-game rnk5WnNope">2,663,409</div>
+                                    <div class="tbl-td td-perMoney rnk5WnAmt">5,000</div>
+                                    <div class="tbl-td td-standard"><span class="color-g">3개</span>번호 일치</div>
+                                </div>
+                            </div>
+                            <div class="tbody-etc">
+                                
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 모바일용 -->
+                    <div class="line-table mobile">
+                        <ul class="this-time-m">
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <p class="num">1등</p>
+                                    <span class="color-g">6개</span>번호 일치
+                                </div>
+                                <div class="col-in-row">
+                                    <div class="col-price tbl-td">
+                                        <span class="tbl-txt">등위별 총 당첨금</span>
+                                        <span class="tbl-txt ta-r color-g rnk1SumWnAmt">27,943,451,640</span>
+                                    </div>
+                                    <div class="col-countnum tbl-td">
+                                        <span class="tbl-txt">당첨게임 수</span>
+                                        <span class="tbl-txt ta-r color-g rnk1WnNope">23</span>
+                                    </div>
+                                    <div class="col-price tbl-td">
+                                        <span class="tbl-txt">1게임당 당첨금</span>
+                                        <span class="tbl-txt ta-r color-g rnk1WnAmt">1,214,932,680</span>
+                                    </div>
+                                </div>
+                            </li>
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <p class="num">2등</p>
+                                    <span class="color-g">5개</span>번호 일치 + <span class="color-g">보너스</span> 번호 일치
+                                </div>
+                                <div class="col-in-row">
+                                    <div class="col-price tbl-td">
+                                        <span class="tbl-txt">등위별 총 당첨금</span>
+                                        <span class="tbl-txt ta-r color-g rnk2SumWnAmt">4,657,242,000</span>
+                                    </div>
+                                    <div class="col-countnum tbl-td">
+                                        <span class="tbl-txt">당첨게임 수</span>
+                                        <span class="tbl-txt ta-r color-g rnk2WnNope">75</span>
+                                    </div>
+                                    <div class="col-price tbl-td">
+                                        <span class="tbl-txt">1게임당 당첨금</span>
+                                        <span class="tbl-txt ta-r color-g rnk2WnAmt">62,096,560</span>
+                                    </div>
+                                </div>
+                            </li>
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <p class="num">3등</p>
+                                    <span class="color-g">5개</span>번호 일치
+                                </div>
+                                <div class="col-in-row">
+                                    <div class="col-price tbl-td">
+                                        <span class="tbl-txt">등위별 총 당첨금</span>
+                                        <span class="tbl-txt ta-r color-g rnk3SumWnAmt">4,657,244,550</span>
+                                    </div>
+                                    <div class="col-countnum tbl-td">
+                                        <span class="tbl-txt">당첨게임 수</span>
+                                        <span class="tbl-txt ta-r color-g rnk3WnNope">3,745</span>
+                                    </div>
+                                    <div class="col-price tbl-td">
+                                        <span class="tbl-txt">1게임당 당첨금</span>
+                                        <span class="tbl-txt ta-r color-g rnk3WnAmt">1,243,590</span>
+                                    </div>
+                                </div>
+                            </li>
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <p class="num">4등</p>
+                                    <span class="color-g">4개</span>번호 일치
+                                </div>
+                                <div class="col-in-row">
+                                    <div class="col-price tbl-td">
+                                        <span class="tbl-txt">등위별 총 당첨금</span>
+                                        <span class="tbl-txt ta-r color-g rnk4SumWnAmt">8,606,600,000</span>
+                                    </div>
+                                    <div class="col-countnum tbl-td">
+                                        <span class="tbl-txt">당첨게임 수</span>
+                                        <span class="tbl-txt ta-r color-g rnk4WnNope">172,132</span>
+                                    </div>
+                                    <div class="col-price tbl-td">
+                                        <span class="tbl-txt">1게임당 당첨금</span>
+                                        <span class="tbl-txt ta-r color-g rnk4WnAmt">50,000</span>
+                                    </div>
+                                </div>
+                            </li>
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <p class="num">5등</p>
+                                    <span class="color-g">3개</span>번호 일치
+                                </div>
+                                <div class="col-in-row">
+                                    <div class="col-price tbl-td">
+                                        <span class="tbl-txt">등위별 총 당첨금</span>
+                                        <span class="tbl-txt ta-r color-g rnk5SumWnAmt">13,317,045,000</span>
+                                    </div>
+                                    <div class="col-countnum tbl-td">
+                                        <span class="tbl-txt">당첨게임 수</span>
+                                        <span class="tbl-txt ta-r color-g rnk5WnNope">2,663,409</span>
+                                    </div>
+                                    <div class="col-price tbl-td">
+                                        <span class="tbl-txt">1게임당 당첨금</span>
+                                        <span class="tbl-txt ta-r color-g rnk5WnAmt">5,000</span>
+                                    </div>
+                                </div>
+                            </li>
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <p class="num">비고</p>
+                                </div>
+                                <div class="col-in-row remarks">
+                                    
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
             
             
             
