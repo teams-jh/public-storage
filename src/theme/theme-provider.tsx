@@ -1,5 +1,10 @@
 'use client';
 
+if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+  import("@apps-in-toss/devtools/panel");
+}
+
+
 import type { Theme, ThemeProviderProps as MuiThemeProviderProps } from '@mui/material/styles';
 import type {} from './extend-theme-types';
 import type { ThemeOptions } from './types';

@@ -10,9 +10,9 @@
     }
   },
   "scripts": {
-    "dev": "granite dev",
+    "dev": "next dev --webpack -p 5173",
     "start": "next start",
-    "build": "yarn ait build",
+    "build": "next build && ait build",
     "deploy": "ait deploy",
     "lint": "eslint \"src/**/*.{js,jsx,ts,tsx}\"",
     "lint:fix": "eslint --fix \"src/**/*.{js,jsx,ts,tsx}\"",
@@ -33,7 +33,7 @@
   },
   "packageManager": "yarn@1.22.22",
   "dependencies": {
-    "@apps-in-toss/web-framework": "^2.10.7",
+    "@apps-in-toss/web-framework": "^3.0.4",
     "@auth0/auth0-react": "^2.3.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
@@ -74,8 +74,8 @@
     "@tiptap/pm": "^2.22.0",
     "@tiptap/react": "^2.22.0",
     "@tiptap/starter-kit": "^2.22.0",
-    "@toss/tds-mobile": "^2.5.0",
-    "@toss/tds-mobile-ait": "^2.5.0",
+    "@toss/tds-mobile": "^2.5.1",
+    "@toss/tds-mobile-ait": "^2.5.1",
     "accept-language": "^3.0.20",
     "apexcharts": "^4.7.0",
     "autosuggest-highlight": "^3.3.4",
@@ -144,6 +144,7 @@
     "globals": "^16.2.0",
     "prettier": "^3.5.3",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.34.1"
+    "typescript-eslint": "^8.34.1",
+    "@apps-in-toss/devtools": "^3.0.4"
   }
 }

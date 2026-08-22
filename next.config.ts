@@ -1,3 +1,4 @@
+import aitDevtools from "@apps-in-toss/devtools/unplugin";
 import type { NextConfig } from 'next';
 
 const isStaticExport = true;
@@ -20,7 +21,11 @@ const nextConfig: any = {
   env: {
     BUILD_STATIC_EXPORT: JSON.stringify(isStaticExport),
   },
-  webpack(config: any) {
+  webpack(config: any, { dev, isServer }: any) {
+    if (dev && !isServer) {
+      config.plugins.unshift(aitDevtools.webpack());
+    }
+
     config.module.rules.push({
       test: /\.svg$/,
       use: ['@svgr/webpack'],
