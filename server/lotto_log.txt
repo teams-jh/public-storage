@@ -12,7 +12,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="ko" xml:lang="ko">
 
 <script type="text/javascript">
-	var rsaModulus = '991b7f16be1c21e765888b9f92d85c3cb8a4972e136fabb1051d32951f0f8fe8ef8b17573dde9c97dd070800cbf4930aefd25e871704d91e898952ca31c9ed76f6599cbe0000b66b67f5556f19e31ecc4ac29061475a85dca97f6da6d7dd1953b41f6f1b2db78974b32c3433030d4e0bd834f4c0955736615b688bf45c9351372e62e11bcfa94758594dac105876ec9d623fbe2976809a58d207375fede1b7ad76638d8c8a751075513eabb0b6f96cc84e3b627cf7df6edd630fb4ed1587cbbb6a457f3d28dae523c53974dd282ed6ed5e6a98bd88ec9ca3f8c372764c187f32d34b9e8c45c1b0721fe22aa3c41d065c19dc2c6fa2f30dcfe73d37cd51e39eb7';
+	var rsaModulus = 'c023b24473ea1e154905f93944d13bc14b10f74ee4e5735472b1569168545dd60a55a8b75c22691993ac021be0528cd8bbca8c9428b80d1681c1a5dcde9a66a53b5a3b6126f02bb4e22b1d8b13f6f4ca83a81266e2f4aa941be216b262d6bd5caf1668f6259072ef00a806ae3ab41c77bc2fb75def8b07bdac3c9b4ecaa24a39ba4fc7eeacb51861abfa266a055c774319030664b38a4b657ab29acc99ba86d2e0c46bbd7d5b58a17316a9182d2db7f6e418489e333eaeeccee9829c47c6251c416d176fd950619f4b49cf7ac5441978f8a0825619b50ed0702234d0c9003a525e535692debafec2128f6aca19343904f877b8586c0c82ae497f4722e55cc5b7';
 	var publicExponent = '10001';
 	
 	const layoutsL = {
@@ -116,8 +116,8 @@
 			var host="www.dhlottery.co.kr";
 			var port="443";
 			var pageUrl = window.location.pathname.substr(1);	// 현재 페이지 정보
-			var ip ='20.169.75.65';							// 클라이언트 IP
-			var loginId ='20.169.75.65';						// 클라이언트 IP 또는 로그인 ID
+			var ip ='20.98.142.48';							// 클라이언트 IP
+			var loginId ='20.98.142.48';						// 클라이언트 IP 또는 로그인 ID
 			
 			if(pageUrl === undefined || pageUrl == null || pageUrl == "") {
 				pageUrl = 'main';
@@ -131,8 +131,8 @@
 			var host="www.dhlottery.co.kr";
 			var port="443";
 			var pageUrl=window.location.pathname.substr(1);	// 현재 페이지 정보
-			var ip ='20.169.75.65';        				// 클라이언트 IP
-			var loginId ='20.169.75.65';   				// 클라이언트 IP 또는 로그인 ID
+			var ip ='20.98.142.48';        				// 클라이언트 IP
+			var loginId ='20.98.142.48';   				// 클라이언트 IP 또는 로그인 ID
 			
 			if(pageUrl === undefined || pageUrl == null || pageUrl == "") {
 				pageUrl = 'main';
@@ -2263,7 +2263,7 @@ const topL = {
 	$(document).ready(function() {
 		var pagingUnit = {
             pageNum : 1,
-            total: "0",
+            total: "84",
             recordCountPerPage : 10
         };
 /*		// 20251202_정경욱 : 결함처리 / 페이징 2번째 클릭 부터 정상 동작 버그 수정. -> fn_selectLtWnShp 바로 호출토록 변경.
@@ -2440,6 +2440,11 @@ const topL = {
                             </div>
                             <div class="tbody-etc">
                                 
+                                    1등
+                                    <br>자동 10
+                                    <br>수동 12
+                                    <br>반자동 1
+                                
                             </div>
                         </div>
                     </div>
@@ -2552,6 +2557,11 @@ const topL = {
                                 </div>
                                 <div class="col-in-row remarks">
                                     
+                                        1등
+                                        &nbsp;자동 10
+                                        &nbsp;수동 12
+                                        &nbsp;반자동 1
+                                    
                                 </div>
                             </li>
                         </ul>
@@ -2561,7 +2571,511 @@ const topL = {
             
             
             
+            <div class="table-wrap smar-table4">
+                <div class="title-wrap">
+                    <span class="txt-title">이번회차 1등 배출점</span>
+                </div>
+                <div class="table-content">
+                    <div class="line-table">
+                        <ul class="store-1st body1">
+                            <li class="thead col4">
+                                <div class="col-num">번호</div>
+                                <div class="col-desc">상호명</div>
+                                <div class="col-address">소재지</div>
+                                <div class="col-auto">구분</div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">1</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">종로3가1호선역2번출구가로판매점82호</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 종로구 돈화문로 23 가판  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">2</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">종로3가1호선역2번출구가로판매점82호</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 종로구 돈화문로 23 가판  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">자동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">3</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">과정미니슈퍼</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">부산 연제구 과정로 234-1  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">자동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">4</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">대영당안경원</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">부산 동래구 충렬대로237번길 9  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">5</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">백금당</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">부산 중구 중구로29번길 26  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">6</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">NBA(엔비에이)</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">인천 영종구 신도시남로142번길 6 1동 1층 128호  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">7</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">대박 복권(크린에이드 신탄진점)</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">대전 대덕구 신탄진동로23번길 22 1층  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">8</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">교통카드충전소</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">경기 고양시 덕양구 화정로 58 화정역 2번출구  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">자동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">9</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">유가네 복권방</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">경기 광주시 장지3길 2 1층  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">10</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">유가네 복권방</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">경기 광주시 장지3길 2 1층  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">11</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">유가네 복권방</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">경기 광주시 장지3길 2 1층  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">12</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">유가네 복권방</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">경기 광주시 장지3길 2 1층  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">13</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">평촌역 명당복권방(2번출구)</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">경기 안양시 동안구 관평로186번길 53 1층 101-2호(관양동씨티빌딩)  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">자동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">14</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">행복복권방</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">경기 시흥시 삼미시장1길 1 일부(신천동)  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">자동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">15</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">천하명당복권방</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">경기 수원시 권선구 매송고색로 720-1  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">자동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">16</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">1등복권청주점</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">충북 청주시 서원구 무심서로 509  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">17</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">행복복권방</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">충남 아산시 온천대로 725 1층  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">18</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">나눔로또편의점</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">전남광주 광양시 공영로 90  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">자동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">19</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">행운복권나라</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">전남광주 광양시 대림오성로 146-1  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">자동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">20</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">성심상회</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">경북 포항시 북구 불종로 78  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">자동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">21</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">목화휴게소</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">경남 사천시 사천대로 912  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">자동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">22</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">골드로또복권방</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">경남 양산시 삼호로 56  </span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">반자동</span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody col4">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">23</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">인터넷 복권판매사이트</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">동행복권(dhlottery.co.kr)</span>
+                                </div>
+                                <div class="col-auto tbl-td">
+                                    <span class="tbl-txt">수동</span>
+                                </div>
+                            </li>
+                            
+                        </ul>
+                    </div>
+                </div>
+            </div>
             
+            
+            
+            <div class="table-wrap smar-table5">
+                <div class="title-wrap">
+                    <span class="txt-title">이번회차 2등 배출점</span>
+                </div>
+                <div class="table-content">
+                    <div class="line-table second-list">
+                        <ul class="store-1st body1">
+                            <li class="thead">
+                                <div class="col-num">번호</div>
+                                <div class="col-desc">상호명</div>
+                                <div class="col-address">소재지</div>
+                            </li>
+                            
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">1</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">복권나라</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 관악구 남부순환로 1739-9 1층  </span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">2</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">하임마트</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 중구 퇴계로 439-4 1층  </span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">3</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">과자종합상사</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 구로구 경인로33길 82  </span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">4</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">인동상회</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 노원구 한글비석로 396 벽산아파트상가108-116  </span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">5</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">스파</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 노원구 동일로 1493 주공10단지종합상가111  </span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">6</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">로또킹</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 영등포구 영중로 2 1층(영등포동3가)  </span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">7</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">Today</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 광진구 광나루로56길 85 테크노마트9층판매동24호  </span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">8</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">행운복권방</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 은평구 연서로21길 8  </span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">9</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">금손로또</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 강서구 공항대로8길 35 1층  </span>
+                                </div>
+                            </li>
+                            
+                            <li class="tbody">
+                                <div class="col-num tbl-td">
+                                    <span class="tbl-txt">10</span>
+                                </div>
+                                <div class="col-desc tbl-td">
+                                    <span class="tbl-txt">로또 천왕점</span>
+                                </div>
+                                <div class="col-address tbl-td">
+                                    <span class="tbl-txt">서울 구로구 오리로 1097-7 (천왕동)  </span>
+                                </div>
+                            </li>
+                            
+                        </ul>
+                    </div>
+                    </div>
+                </div>
+                <div id="pagenation0"></div>
+            </div>
             
             
         </div>
