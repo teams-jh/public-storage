@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "id": "al-is-well",
+    "title": "오픽 AL is Well",
+    "subtitle": "나만의 스크립트를 만들고 싶다면?",
+    "logoImage": "/personal-ad/al-is-well.png",
+    "linkUrl": "al-is-well",
+    "buttonText": "연습하기",
+    "theme": "indigo"
+  }
+]
