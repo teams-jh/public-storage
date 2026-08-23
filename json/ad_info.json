@@ -7,5 +7,14 @@
     "linkUrl": "al-is-well",
     "buttonText": "연습하기",
     "theme": "indigo"
+  },
+  {
+    "id": "toeic-bank",
+    "title": "토익 RC PART 5 문제 은행",
+    "subtitle": "토익 점수가 필요하다면?",
+    "logoImage": "/personal-ad/toeic-bank.png",
+    "linkUrl": "toeic-bank",
+    "buttonText": "풀어보기",
+    "theme": "blue"
   }
 ]
