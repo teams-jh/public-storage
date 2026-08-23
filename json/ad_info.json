@@ -6,6 +6,6 @@
     logoImage: '/personal-ad/al-is-well.png',
     linkUrl: 'al-is-well',
     buttonText: '연습하기',
-    theme: 'indigo',
+    theme: 'indigo'
   }  
 ]
