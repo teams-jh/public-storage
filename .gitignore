@@ -134,3 +134,32 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# ==========================================
+# Python & Macro Automation
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Macro Sessions & Browser User Data
+macro/sessions/
+macro/.playwright/
+macro/client_secrets.json
+macro/*.pickle
+macro/*.session
+macro/*_session.json
+
+# Macro Upload Directory (Keep folder structure via .gitkeep)
+macro/upload/*
+!macro/upload/.gitkeep
+

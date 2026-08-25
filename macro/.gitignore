@@ -1,0 +1,50 @@
+# ==========================================
+# Python Bytecode & Cache
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ==========================================
+# Virtual Environment
+# ==========================================
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ==========================================
+# Credentials, Tokens & Secrets
+# ==========================================
+.env
+.env.*
+!.env.example
+client_secrets.json
+*.pickle
+*.session
+*_session.json
+
+# ==========================================
+# Browser Sessions & Playwright User Data
+# ==========================================
+sessions/
+.playwright/
+
+# ==========================================
+# Local Upload Media Files (Do not commit user media)
+# ==========================================
+upload/*
+!upload/.gitkeep
+
+# ==========================================
+# OS & Editor Files
+# ==========================================
+.DS_Store
+Thumbs.db
+*.log
