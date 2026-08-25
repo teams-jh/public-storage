@@ -208,35 +208,28 @@ class TikTokUploader(BaseUploader):
                 content = metadata.get("content", "")
                 tags = metadata.get("tags", "")
                 full_caption = metadata.get("full_caption", "")
-                desc_text = f"{content}\n\n{tags}".strip() if (content or tags) else full_caption
 
                 self.logger.info("제목 및 설명(본문) 입력 시작...")
                 page.wait_for_timeout(1500)
 
-                # 1) 제목(Title) 필드 입력 시도
-                title_filled = False
-                title_inputs = page.locator("input[placeholder*='제목'], input[placeholder*='title'], input[type='text']")
-                if title_inputs.count() > 0 and title:
-                    try:
-                        title_target = title_inputs.first
-                        title_target.click()
-                        page.wait_for_timeout(300)
-                        title_target.fill(title[:90])  # 틱톡 제목 90자 제한
-                        page.wait_for_timeout(500)
-                        self.logger.info(f"제목 입력 완료: {title[:30]}...")
-                        title_filled = True
-                    except Exception as e:
-                        self.logger.warning(f"제목 fill 실패, 키보드 타이핑 시도: {e}")
+                # 1) 사진 모드일 경우: 상단 [제목] 필드 + 하단 [설명] 필드 분리 입력
+                if media_type != "video":
+                    title_inputs = page.locator("input[placeholder*='제목'], input[placeholder*='title'], input[placeholder*='눈에 띄는 제목']")
+                    if title_inputs.count() > 0 and title:
                         try:
                             title_inputs.first.click()
-                            page.keyboard.insert_text(title[:90])
-                            title_filled = True
+                            page.wait_for_timeout(300)
+                            title_inputs.first.fill(title[:90])
+                            self.logger.info(f"사진 제목 입력 완료: {title[:30]}...")
                         except Exception:
                             pass
+                    
+                    desc_text = f"{content}\n\n{tags}".strip() if (content or tags) else full_caption
+                else:
+                    # 동영상 모드일 경우: 단일 캡션창에 [제목 + 내용 + 태그] 전체 입력
+                    desc_text = full_caption
 
-                # 2) 설명/본문(Description) 필드 입력 시도
-                caption_filled = False
-                # contenteditable div 또는 textarea 탐색
+                # 2) 설명/본문(Description) 필드 입력 (DraftJS 에디터)
                 caption_candidates = page.locator(
                     "div.public-DraftEditor-content, div[contenteditable='true'], div[role='combobox'], textarea"
                 )
@@ -250,25 +243,24 @@ class TikTokUploader(BaseUploader):
                             break
 
                 if caption_candidates.count() > 0:
-                    # 제목창과 겹치지 않게 선택
-                    target_box = caption_candidates.last if (title_filled and caption_candidates.count() > 1) else caption_candidates.first
+                    target_box = caption_candidates.first
                     try:
                         target_box.click()
                         page.wait_for_timeout(500)
-                        # DraftJS / contenteditable 지원을 위해 키보드 직접 입력 사용
+                        # 기존 텍스트 완전 삭제 후 전체 텍스트 주입
                         page.keyboard.press("Control+A")
                         page.keyboard.press("Backspace")
-                        page.keyboard.insert_text(desc_text or full_caption)
-                        page.wait_for_timeout(1500)
-                        self.logger.info("설명(본문) 입력 완료!")
-                        caption_filled = True
+                        page.wait_for_timeout(300)
+                        page.keyboard.insert_text(desc_text)
+                        page.wait_for_timeout(1000)
+                        self.logger.info(f"설명(본문) 텍스트 입력 완료!\n--- 입력 내용 ---\n{desc_text}\n-----------------")
                     except Exception as e:
                         self.logger.warning(f"키보드 텍스트 입력 실패, fill 재시도: {e}")
                         try:
-                            target_box.fill(desc_text or full_caption)
-                            caption_filled = True
+                            target_box.fill(desc_text)
                         except Exception:
                             pass
+
 
                 # 페이지 맨 아래로 스크롤하여 [게시] 버튼 노출
                 self.logger.info("페이지 하단으로 스크롤하여 [게시] 버튼을 탐색합니다...")
@@ -338,12 +330,50 @@ class TikTokUploader(BaseUploader):
                     post_completed = False
                     for _ in range(upload_timeout):
                         page.wait_for_timeout(1000)
-                        # '끝낼까요?' 모달 방어
-                        cancel_modal = page.locator("div[role='dialog'] button:text-is('취소'), button:text-is('취소')")
-                        if cancel_modal.count() > 0 and cancel_modal.first.is_visible():
+
+                        # 1) '계속 게시할까요?' / '잠재적 문제에 대한 검사' 팝업 감지 시 [지금 게시] 자동 클릭
+                        try:
+                            handled_popup = page.evaluate("""() => {
+                                const dialogs = Array.from(document.querySelectorAll("div[role='dialog'], div[class*='modal'], div[class*='popup'], div[class*='TuxModal']"));
+                                for (const d of dialogs) {
+                                    const text = d.textContent || "";
+                                    if (text.includes("계속 게시") || text.includes("검사") || text.includes("Post anyway") || text.includes("Continue posting")) {
+                                        const btns = Array.from(d.querySelectorAll("button"));
+                                        for (const b of btns) {
+                                            const btnText = b.textContent ? b.textContent.trim() : "";
+                                            if (btnText.includes("지금 게시") || btnText.includes("Post now") || btnText.includes("Post anyway") || btnText === "게시") {
+                                                b.click();
+                                                b.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                }
+                                return false;
+                            }""")
+                            if handled_popup:
+                                self.logger.info("⚠️ TikTok '계속 게시할까요?' 확인 팝업 감지 -> [지금 게시] 버튼 자동 클릭 완료!")
+                                page.wait_for_timeout(1000)
+                        except Exception:
                             pass
 
-                        # 완료 확인 텍스트 탐색
+                        # Playwright 선택자로도 [지금 게시] 보조 클릭
+                        post_now_btn = page.locator(
+                            "button:text-is('지금 게시'), "
+                            "button:has-text('지금 게시'), "
+                            "div[role='dialog'] button:has-text('지금 게시'), "
+                            "div[role='dialog'] button:has-text('Post now'), "
+                            "div[role='dialog'] button:has-text('Post anyway')"
+                        )
+                        if post_now_btn.count() > 0 and post_now_btn.first.is_visible():
+                            try:
+                                self.logger.info("⚠️ [지금 게시] 팝업 버튼 선택자 감지 -> 클릭!")
+                                post_now_btn.first.click(force=True)
+                                page.wait_for_timeout(1000)
+                            except Exception:
+                                pass
+
+                        # 2) 완료 확인 텍스트 탐색
                         success_indicators = page.locator(
                             "div:has-text('게시되었습니다'), div:has-text('업로드 완료'), "
                             "div:has-text('동영상이 게시되었습니다'), button:has-text('다른 동영상 업로드'), "
@@ -365,6 +395,7 @@ class TikTokUploader(BaseUploader):
                         page.wait_for_timeout(5000)
                         browser.close()
                         return False
+
 
                 self.logger.error("게시 버튼을 찾지 못했습니다.")
                 page.wait_for_timeout(5000)

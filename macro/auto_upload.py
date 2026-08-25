@@ -94,15 +94,28 @@ def main():
 
     # 3. 대상 플랫폼 선정
     if args.platform == "all":
-        selected_platforms = list(PLATFORM_MAP.keys())
+        # 페이스북은 현재 비활성화되어 제외
+        selected_platforms = [k for k in PLATFORM_MAP.keys() if k != "facebook"]
     else:
         selected_platforms = [args.platform]
 
     print(f"\n🎯 [3] 업로드 대상 플랫폼: {', '.join(selected_platforms)}")
+    if args.platform == "all":
+        print(" (ℹ️ 페이스북은 현재 비활성화되어 건너뜁니다)")
     print("-" * 65)
 
     results = {}
     for plat_key in selected_platforms:
+        if plat_key == "facebook":
+            print(f"\n▶ [Facebook] ⚠️ 페이스북 업로드 기능은 현재 비활성화되어 있어 건너뜁니다.")
+            results["Facebook"] = "⏸️ 비활성화 (건너뜀)"
+            continue
+
+        if plat_key == "youtube" and media_type != "video":
+            print(f"\n▶ [YouTube] ⚠️ YouTube는 동영상 전용 플랫폼입니다. 현재 파일({media_type_name})은 업로드를 건너뜁니다.")
+            results["YouTube"] = "⏭️ 건너뜀 (동영상 전용)"
+            continue
+
         uploader_cls = PLATFORM_MAP[plat_key]
         uploader = uploader_cls()
         
@@ -113,6 +126,7 @@ def main():
         except Exception as e:
             print(f"❌ [{uploader.platform_name}] 에러 발생: {e}")
             results[uploader.platform_name] = f"❌ 실패 ({e})"
+
 
     # 4. 결과 요약 리포트
     print("\n" + "=" * 65)
