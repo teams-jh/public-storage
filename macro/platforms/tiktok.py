@@ -257,56 +257,87 @@ class TikTokUploader(BaseUploader):
                         page.keyboard.press("Backspace")
                         page.wait_for_timeout(300)
 
-                        # 본문 먼저 입력
+                        # 본문 먼저 입력 후 콘텐츠 아래로 엔터(개행) 입력
                         if base_desc:
                             page.keyboard.insert_text(base_desc)
                             page.wait_for_timeout(500)
+                            # 콘텐츠 아래에 확실하게 엔터(Enter) 입력
+                            self.logger.info("콘텐츠 아래로 엔터(Enter) 개행 입력...")
+                            page.keyboard.press("Enter")
+                            page.wait_for_timeout(200)
+                            page.keyboard.press("Enter")
+                            page.wait_for_timeout(300)
 
-                        # 해시태그 순차 입력 및 첫 번째 추천값 클릭/Enter 선택
+                        # 헬퍼: 커서를 contenteditable 에디터 맨 끝으로 강제 이동
+                        def move_cursor_to_end():
+                            try:
+                                page.evaluate("""() => {
+                                    const editor = document.querySelector("div.public-DraftEditor-content") || document.querySelector("div[contenteditable='true']");
+                                    if (editor) {
+                                        editor.focus();
+                                        const range = document.createRange();
+                                        range.selectNodeContents(editor);
+                                        range.collapse(false);
+                                        const sel = window.getSelection();
+                                        sel.removeAllRanges();
+                                        sel.addRange(range);
+                                    }
+                                }""")
+                            except Exception:
+                                pass
+                            page.wait_for_timeout(300)
+
+                        # 해시태그 순차 입력 시퀀스
                         if tags:
                             tag_list = [t.strip().lstrip("#") for t in tags.split() if t.strip()]
-                            for t in tag_list:
+                            for idx, t in enumerate(tag_list):
                                 if not t:
                                     continue
+                                
+                                # 매 태그 입력 전 커서를 무조건 에디터 맨 끝으로 이동
+                                move_cursor_to_end()
                                 page.keyboard.insert_text(" ")
                                 page.wait_for_timeout(200)
 
-                                # #태그 타이핑
-                                self.logger.info(f"TikTok 태그 타이핑: #{t}")
-                                page.keyboard.type(f"#{t}", delay=60)
-                                page.wait_for_timeout(800)
+                                # 1) #[해시할태그] 입력
+                                self.logger.info(f"1) TikTok 해시태그 입력 ({idx + 1}/{len(tag_list)}): #{t}")
+                                page.keyboard.type(f"#{t}", delay=70)
 
-                                # 드롭다운의 첫 번째 추천값 클릭 시도 또는 Enter
-                                clicked_sug = False
-                                sug_items = page.locator(
-                                    "div[class*='sug-item'], "
-                                    "div[class*='suggestion'], "
-                                    "div[class*='mention-item'], "
-                                    "div[class*='hashtag-item'], "
-                                    "div[role='option'], "
-                                    "div:has-text('#" + t + "')"
-                                )
-                                if sug_items.count() > 0:
-                                    try:
-                                        sug_items.first.click()
-                                        clicked_sug = True
-                                        self.logger.info(f"TikTok 첫 번째 추천 해시태그 클릭 적용: #{t}")
-                                    except Exception:
-                                        pass
+                                # 2) 3초 뒤에 Tab 키 전송
+                                self.logger.info("2) 3초 대기 후 Tab 키 전송...")
+                                page.wait_for_timeout(3000)
+                                page.keyboard.press("Tab")
 
-                                if not clicked_sug:
-                                    page.keyboard.press("Enter")
-                                    self.logger.info(f"TikTok Enter 키로 해시태그 적용: #{t}")
+                                # 3) 1초 뒤에 아래 버튼 전송
+                                self.logger.info("3) 1초 대기 후 아래(ArrowDown) 버튼 전송...")
+                                page.wait_for_timeout(1000)
+                                page.keyboard.press("ArrowDown")
 
-                                page.wait_for_timeout(500)
+                                # 4) 1초 뒤에 위 버튼 전송
+                                self.logger.info("4) 1초 대기 후 위(ArrowUp) 버튼 전송...")
+                                page.wait_for_timeout(1000)
+                                page.keyboard.press("ArrowUp")
 
-                        self.logger.info(f"TikTok 본문 및 해시태그 입력 완료!")
+                                # 5) 1초 뒤에 엔터 버튼 전송
+                                self.logger.info("5) 1초 대기 후 엔터(Enter) 버튼 전송...")
+                                page.wait_for_timeout(1000)
+                                page.keyboard.press("Enter")
+                                page.wait_for_timeout(1000)
+
+                                # 엔터 선택 후에도 커서를 에디터 맨 끝으로 즉시 고정
+                                move_cursor_to_end()
+
+                        self.logger.info("🎉 TikTok 본문 및 해시태그 입력 시퀀스 완료!")
+
+
                     except Exception as e:
                         self.logger.warning(f"키보드 텍스트 입력 실패, fill 재시도: {e}")
                         try:
                             target_box.fill(f"{base_desc}\n\n{tags}".strip())
                         except Exception:
                             pass
+
+
 
 
 
