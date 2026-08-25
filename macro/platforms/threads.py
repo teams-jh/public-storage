@@ -44,54 +44,102 @@ class ThreadsUploader(BaseUploader):
                     args=["--disable-blink-features=AutomationControlled"]
                 )
                 page = browser.new_page()
+                page.on("filechooser", lambda fc: None)
+
                 page.goto("https://www.threads.net/", wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(3000)
 
+                # 로그인 확인 및 대기 루프 (최대 180초)
+                self.logger.info("Threads 로그인 상태 확인 중...")
+                logged_in = False
+                for attempt in range(36):  # 5초 * 36 = 180초
+                    # 로그인 완료 지표 확인 (스레드 시작 박스, 만들기 아이콘, 프로필 링크 등)
+                    start_box = page.locator(
+                        "div:has-text('스레드를 시작하세요...'), "
+                        "div:has-text('Start a thread...'), "
+                        "svg[aria-label='만들기'], "
+                        "svg[aria-label='Create'], "
+                        "a[aria-label*='프로필'], "
+                        "a[aria-label*='Profile']"
+                    )
+                    if start_box.count() > 0:
+                        logged_in = True
+                        self.logger.info("Threads 로그인 확인 완료!")
+                        break
 
-                # 로그인 확인
-                if "login" in page.url:
-                    self.logger.info("Threads 로그인이 필요합니다. 브라우저에서 인스타/스레드 계정으로 로그인해 주세요 (60초 대기)...")
-                    page.wait_for_url("https://www.threads.net/", timeout=60000)
+                    if attempt == 0 or attempt % 6 == 0:
+                        self.logger.info("Threads 로그인이 필요합니다. 브라우저에서 인스타그램/Threads 계정으로 로그인해 주세요 (대기 중)...")
+
+                    page.wait_for_timeout(5000)
+
+                if not logged_in:
+                    self.logger.error("Threads 로그인 대기 시간이 초과되었습니다.")
+                    page.wait_for_timeout(5000)
+                    browser.close()
+                    return False
 
                 self.logger.info("새 스레드 작성 시작...")
-                # 스레드 작성 박스 또는 만들기 버튼 클릭
                 page.wait_for_timeout(2000)
                 
-                # '스레드를 시작하세요...' 또는 만들기 버튼
-                start_box = page.locator("div:has-text('스레드를 시작하세요...'), div:has-text('Start a thread...'), svg[aria-label='만들기'], svg[aria-label='Create']")
-                if start_box.count() > 0:
-                    start_box.first.click()
-                    page.wait_for_timeout(1000)
+                # '스레드를 시작하세요...' 또는 만들기 버튼 클릭
+                create_triggers = page.locator(
+                    "div:has-text('스레드를 시작하세요...'), "
+                    "div:has-text('Start a thread...'), "
+                    "svg[aria-label='만들기'], "
+                    "svg[aria-label='Create']"
+                )
+                if create_triggers.count() > 0:
+                    try:
+                        create_triggers.first.click()
+                        page.wait_for_timeout(1000)
+                    except Exception:
+                        pass
 
                 # 내용 입력
                 textbox = page.locator("div[role='textbox'], div[contenteditable='true']")
                 if textbox.count() > 0:
-                    textbox.first.fill(caption)
-                    page.wait_for_timeout(1000)
+                    try:
+                        textbox.first.click()
+                        page.wait_for_timeout(300)
+                        page.keyboard.insert_text(caption)
+                        page.wait_for_timeout(1000)
+                        self.logger.info("스레드 내용 입력 완료!")
+                    except Exception as e:
+                        self.logger.warning(f"스레드 텍스트 입력 실패 (무시): {e}")
 
                 # 파일 첨부 (파일 인풋 찾기)
                 file_input = page.locator("input[type='file']")
                 if file_input.count() > 0:
+                    self.logger.info(f"{media_type.upper()} 파일 첨부 중...")
                     file_input.first.set_input_files(str(media_path.resolve()))
-                    self.logger.info(f"{media_type.capitalize()} 파일 첨부 중...")
-                    wait_sec = 8 if media_type == "video" else 3
+                    wait_sec = 10 if media_type == "video" else 3
                     page.wait_for_timeout(wait_sec * 1000)
 
                 # 게시 버튼 클릭
-                post_btn = page.locator("div[role='button']:has-text('게시'), div[role='button']:has-text('Post')")
+                post_btn = page.locator("div[role='button']:has-text('게시'), div[role='button']:has-text('Post'), button:has-text('게시'), button:has-text('Post')")
                 if post_btn.count() > 0:
-                    post_btn.first.click()
-                    self.logger.info("게시 중... 완료 대기 (10초)")
+                    target_btn = post_btn.first
+                    for _ in range(15):
+                        try:
+                            if target_btn.is_enabled():
+                                break
+                        except Exception:
+                            pass
+                        page.wait_for_timeout(1000)
+
+                    target_btn.click(force=True)
+                    self.logger.info("게시하기 버튼 클릭 완료. 서버 전송 대기 (10초)...")
                     page.wait_for_timeout(10000)
-                    self.logger.info("Threads 업로드 성공 완료!")
+                    self.logger.info("🎉 Threads 업로드 성공 완료!")
                     browser.close()
                     return True
 
-                self.logger.warning("게시 버튼을 찾을 수 없어 브라우저를 열어둡니다.")
+                self.logger.error("Threads 게시 버튼을 찾을 수 없습니다.")
                 page.wait_for_timeout(5000)
                 browser.close()
-                return True
+                return False
         except Exception as e:
             self.logger.error(f"Playwright Threads 업로드 실패: {e}")
             return False
+
 

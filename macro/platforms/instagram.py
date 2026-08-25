@@ -75,22 +75,28 @@ class InstagramUploader(BaseUploader):
                 page.wait_for_timeout(3000)
 
 
-                # 로그인 확인
-                if "login" in page.url:
-                    self.logger.info("Instagram 로그인이 필요합니다. 브라우저에서 로그인해 주세요 (60초 대기)...")
-                    if self.username and self.password:
-                        try:
-                            page.fill("input[name='username']", self.username)
-                            page.fill("input[name='password']", self.password)
-                            page.click("button[type='submit']")
-                            page.wait_for_timeout(5000)
-                        except Exception:
-                            pass
-                    # 로그인 완료 대기
-                    page.wait_for_url("https://www.instagram.com/", timeout=60000)
+                # 로그인 확인 및 대기 루프 (최대 180초)
+                self.logger.info("Instagram 로그인 상태 확인 중...")
+                logged_in = False
+                for attempt in range(36):  # 5초 * 36 = 180초
+                    create_btn = page.locator("svg[aria-label='새로운 게시물'], svg[aria-label='New post']").locator("..")
+                    if create_btn.count() > 0:
+                        logged_in = True
+                        self.logger.info("Instagram 로그인 확인 완료!")
+                        break
+
+                    if attempt == 0 or attempt % 6 == 0:
+                        self.logger.info("Instagram 로그인이 필요합니다. 브라우저에서 로그인해 주세요 (대기 중)...")
+
+                    page.wait_for_timeout(5000)
+
+                if not logged_in:
+                    self.logger.error("Instagram 로그인 대기 시간이 초과되었습니다.")
+                    page.wait_for_timeout(5000)
+                    browser.close()
+                    return False
 
                 self.logger.info("만들기(+) 버튼 클릭 및 미디어 업로드 시도...")
-                # 만들기 아이콘 찾기 (New post)
                 create_btn = page.locator("svg[aria-label='새로운 게시물'], svg[aria-label='New post']").locator("..")
                 if create_btn.count() > 0:
                     create_btn.first.click()
@@ -98,8 +104,9 @@ class InstagramUploader(BaseUploader):
 
                     # 파일 업로드 인풋 찾기
                     file_input = page.locator("input[type='file']")
-                    file_input.set_input_files(str(media_path.resolve()))
-                    page.wait_for_timeout(3000)
+                    if file_input.count() > 0:
+                        file_input.first.set_input_files(str(media_path.resolve()))
+                        page.wait_for_timeout(3000)
 
                     # 비율/자르기/필터 '다음' 단계 클릭 (최대 3회 시도)
                     for _ in range(3):
@@ -113,24 +120,30 @@ class InstagramUploader(BaseUploader):
                     # 캡션 입력
                     caption_box = page.locator("div[aria-label='문구 입력...'], div[aria-label='Write a caption...'], div[role='textbox']")
                     if caption_box.count() > 0:
-                        caption_box.first.fill(caption)
-                        page.wait_for_timeout(1000)
+                        try:
+                            caption_box.first.click()
+                            page.wait_for_timeout(300)
+                            page.keyboard.insert_text(caption)
+                            page.wait_for_timeout(1000)
+                        except Exception:
+                            caption_box.first.fill(caption)
 
                     # 공유하기 클릭
                     share_btn = page.locator("div[role='button']:has-text('공유하기'), div[role='button']:has-text('Share')")
                     if share_btn.count() > 0:
-                        share_btn.first.click()
+                        share_btn.first.click(force=True)
                         self.logger.info("게시물이 공유되는 중입니다. 완료될 때까지 대기합니다...")
                         page.wait_for_timeout(15000)
-                        self.logger.info("Instagram 업로드 성공 완료!")
+                        self.logger.info("🎉 Instagram 업로드 성공 완료!")
                         browser.close()
                         return True
 
-                self.logger.warning("업로드 버튼을 자동으로 완료하지 못했습니다. 수동으로 확인해 주세요.")
-                page.wait_for_timeout(10000)
+                self.logger.error("Instagram 업로드 버튼을 찾지 못했습니다.")
+                page.wait_for_timeout(5000)
                 browser.close()
-                return True
+                return False
         except Exception as e:
             self.logger.error(f"Playwright 인스타그램 업로드 실패: {e}")
             return False
+
 

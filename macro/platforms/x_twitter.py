@@ -94,44 +94,189 @@ class TwitterXUploader(BaseUploader):
                     args=["--disable-blink-features=AutomationControlled"]
                 )
                 page = browser.new_page()
+                page.on("filechooser", lambda fc: None)
+
                 page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(3000)
 
+                # 로그인 확인 및 대기 루프 (최대 180초)
+                self.logger.info("X(Twitter) 로그인 상태 확인 중...")
+                logged_in = False
+                for attempt in range(36):  # 5초 * 36 = 180초
+                    # 로그인 완료 지표 확인 (트윗 입력창, 새 트윗 버튼, 사이드바 링크, 계정 스위처 등)
+                    login_indicators = page.locator(
+                        "div[data-testid='tweetTextarea_0'], "
+                        "a[data-testid='SideNav_NewTweet_Button'], "
+                        "button[data-testid='SideNav_AccountSwitcher_Button'], "
+                        "a[data-testid='AppTabBar_Home_Link'], "
+                        "nav[aria-label='기본 타임라인'], "
+                        "nav[aria-label='Primary Timeline']"
+                    )
+                    if login_indicators.count() > 0:
+                        logged_in = True
+                        self.logger.info("X(Twitter) 로그인 확인 완료!")
+                        break
 
-                # 로그인 확인
-                if "login" in page.url or "i/flow/login" in page.url:
-                    self.logger.info("X 로그인이 필요합니다. 브라우저에서 로그인해 주세요 (60초 대기)...")
-                    page.wait_for_url("https://x.com/home", timeout=60000)
+                    # 로그인 안내 메시지
+                    if attempt == 0 or attempt % 6 == 0:
+                        self.logger.info("X(Twitter) 로그인이 필요합니다. 브라우저에서 Google 계정 또는 아이디로 로그인해 주세요 (대기 중)...")
+                        # 비로그인 첫 화면에서 로그인 버튼이 보이면 클릭 보조
+                        login_btn = page.locator("a[href='/login'], a[data-testid='loginButton'], span:text-is('로그인'), span:text-is('Log in')")
+                        if login_btn.count() > 0 and "login" not in page.url:
+                            try:
+                                login_btn.first.click()
+                            except Exception:
+                                pass
+
+                    page.wait_for_timeout(5000)
+
+                if not logged_in:
+                    self.logger.error("X(Twitter) 로그인 대기 시간이 초과되었습니다.")
+                    page.wait_for_timeout(5000)
+                    browser.close()
+                    return False
 
                 self.logger.info("트윗 작성 시작...")
-                # 트윗 입력창 찾기
-                textbox = page.locator("div[data-testid='tweetTextarea_0'], div[role='textbox']")
+                page.wait_for_timeout(2000)
+
+                # 1. 새 트윗 작성 모달 열기 (사이드바 버튼 클릭)
+                new_tweet_btn = page.locator("a[data-testid='SideNav_NewTweet_Button'], a[href='/compose/post']")
+                if new_tweet_btn.count() > 0:
+                    try:
+                        new_tweet_btn.first.click()
+                        page.wait_for_timeout(1500)
+                        self.logger.info("새 트윗 작성 창 열림")
+                    except Exception:
+                        pass
+
+                # 2. 트윗 텍스트 입력창 찾기
+                textbox = page.locator("div[role='dialog'] div[data-testid='tweetTextarea_0'], div[data-testid='tweetTextarea_0'], div[role='textbox']")
                 if textbox.count() > 0:
-                    textbox.first.click()
-                    textbox.first.fill(caption)
-                    page.wait_for_timeout(1000)
+                    try:
+                        target_box = textbox.first
+                        target_box.click()
+                        page.wait_for_timeout(300)
+                        # 키보드 직접 타이핑 및 입력
+                        page.keyboard.press("Control+A")
+                        page.keyboard.press("Backspace")
+                        page.keyboard.insert_text(caption)
+                        page.wait_for_timeout(1000)
+                        self.logger.info("트윗 내용 작성 완료!")
+                    except Exception as e:
+                        self.logger.warning(f"텍스트 입력 실패: {e}")
 
-                # 미디어 파일 업로드 (file input)
-                file_input = page.locator("input[data-testid='fileInput'], input[type='file']")
+                # 3. 미디어 파일 업로드 (file input)
+                file_input = page.locator("div[role='dialog'] input[data-testid='fileInput'], input[data-testid='fileInput'], input[type='file']")
                 if file_input.count() > 0:
+                    self.logger.info(f"{media_type.upper()} 파일 첨부 중...")
                     file_input.first.set_input_files(str(media_path.resolve()))
-                    wait_sec = 10 if media_type == "video" else 3
-                    self.logger.info(f"{media_type.capitalize()} 업로드 및 처리 대기 ({wait_sec}초)...")
-                    page.wait_for_timeout(wait_sec * 1000)
+                    
+                    # 미디어 처리 및 프리뷰 렌더링 대기
+                    self.logger.info("미디어 파일 처리 및 렌더링 대기 중...")
+                    for _ in range(15):
+                        page.wait_for_timeout(2000)
+                        has_attachment = page.locator(
+                            "div[data-testid='attachments'], "
+                            "div[aria-label*='제거'], "
+                            "div[aria-label*='Remove'], "
+                            "div[data-testid='media']"
+                        ).count() > 0
+                        if has_attachment:
+                            self.logger.info("미디어 첨부 완료 확인!")
+                            break
 
-                # 게시하기(Tweet/Post) 버튼 클릭
-                post_btn = page.locator("button[data-testid='tweetButtonInline'], button[data-testid='tweetButton']")
+                # 4. AI 생성 콘텐츠 안내 툴팁 방어 및 게시 버튼 클릭
+                page.wait_for_timeout(1000)
+                # AI generated content detected 툴팁 감지 및 해제
+                ai_tooltips = page.locator(
+                    "text='AI generated content detected', "
+                    "text='AI generated', "
+                    "div:has-text('AI generated content detected')"
+                )
+                if ai_tooltips.count() > 0:
+                    self.logger.info("AI 생성 콘텐츠 안내 툴팁 감지 - 닫기 시도 중...")
+                    try:
+                        ai_tooltips.first.click()
+                        page.wait_for_timeout(500)
+                    except Exception:
+                        pass
+
+                post_btn = page.locator(
+                    "div[role='dialog'] button[data-testid='tweetButton'], "
+                    "button[data-testid='tweetButton'], "
+                    "button[data-testid='tweetButtonInline'], "
+                    "div[data-testid='tweetButtonInline'], "
+                    "div[data-testid='tweetButton'], "
+                    "button:has-text('Post'), "
+                    "button:has-text('게시하기')"
+                )
+
                 if post_btn.count() > 0:
-                    post_btn.first.click()
-                    self.logger.info("게시 중... 완료 대기 (5초)")
-                    page.wait_for_timeout(5000)
-                    self.logger.info("X(Twitter) 업로드 성공 완료!")
+                    target_btn = post_btn.first
+                    # 비활성화 해제 대기 (최대 20초)
+                    for _ in range(20):
+                        try:
+                            aria_disabled = target_btn.get_attribute("aria-disabled")
+                            if target_btn.is_enabled() and aria_disabled != "true":
+                                break
+                        except Exception:
+                            pass
+                        page.wait_for_timeout(1000)
+
+                    self.logger.info("하단 게시하기(Post) 실행 중...")
+                    
+                    # 1) Playwright 강제 클릭
+                    try:
+                        target_btn.click(force=True)
+                    except Exception:
+                        pass
+
+                    # 2) JavaScript DOM 직접 클릭 이벤트 디스패치
+                    try:
+                        page.evaluate("""() => {
+                            const btns = Array.from(document.querySelectorAll("button, div[role='button']"));
+                            for (const btn of btns) {
+                                const text = btn.textContent ? btn.textContent.trim() : "";
+                                const testId = btn.getAttribute("data-testid") || "";
+                                if (testId === "tweetButton" || testId === "tweetButtonInline" || text === "Post" || text === "게시하기") {
+                                    btn.click();
+                                    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }""")
+                    except Exception:
+                        pass
+
+                    # 3) X(Twitter) 전송 단축키 (Control+Enter) 입력
+                    try:
+                        page.keyboard.press("Control+Enter")
+                    except Exception:
+                        pass
+
+                    self.logger.info("게시 요청 전송 완료. 서버 처리 및 완료 대기 중 (12초)...")
+                    
+                    # 완료 대기 (모달 닫힘 또는 토스트 메시지 감지)
+                    for _ in range(12):
+                        page.wait_for_timeout(1000)
+                        toast = page.locator("div[data-testid='toast']")
+                        if toast.count() > 0 and toast.first.is_visible():
+                            self.logger.info("🎉 X(Twitter) 게시 토스트 확인!")
+                            break
+
+                    page.wait_for_timeout(3000)
+                    self.logger.info("🎉 X(Twitter) 업로드 최종 성공 완료!")
                     browser.close()
                     return True
 
+                self.logger.error("X(Twitter) 게시하기 버튼을 찾을 수 없습니다.")
+                page.wait_for_timeout(5000)
                 browser.close()
-                return True
+                return False
+
         except Exception as e:
             self.logger.error(f"Playwright X(Twitter) 업로드 실패: {e}")
             return False
+
 

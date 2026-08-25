@@ -22,9 +22,24 @@ class TikTokUploader(BaseUploader):
         """
         상단 [사진] 탭으로 확실하게 전환하는 다중 방어 로직
         """
-        self.logger.info("상단 [사진] 탭 전환 시도 중...")
+        self.logger.info("상단 [사진] 탭 전환 확인 중...")
         
-        # 1. JavaScript 직접 탐색 및 클릭 (DOM 이벤트 버블링)
+        # 1. 이미 사진 탭이 활성화되어 있는지 확인
+        try:
+            is_active = page.evaluate("""() => {
+                const inputs = Array.from(document.querySelectorAll("input[type='file']"));
+                for (const inp of inputs) {
+                    if (inp.accept && inp.accept.includes("image")) return true;
+                }
+                return false;
+            }""")
+            if is_active:
+                self.logger.info("이미 [사진] 탭이 활성화되어 있습니다.")
+                return True
+        except Exception:
+            pass
+
+        # 2. JavaScript DOM 탐색 및 강제 클릭
         try:
             clicked = page.evaluate("""() => {
                 const elements = Array.from(document.querySelectorAll("div, span, button, p, a, [role='tab']"));
@@ -43,11 +58,11 @@ class TikTokUploader(BaseUploader):
             }""")
             if clicked:
                 page.wait_for_timeout(1500)
-                self.logger.info("JavaScript 직접 클릭으로 [사진] 탭 전환 성공")
+                self.logger.info("JavaScript DOM 이벤트로 [사진] 탭 클릭 성공")
         except Exception as e:
-            self.logger.warning(f"JS 탭 클릭 시도 중 예외 (무시): {e}")
+            self.logger.warning(f"JS 탭 클릭 예외: {e}")
 
-        # 2. Playwright 다중 선택자 강제 클릭
+        # 3. Playwright 다중 선택자 강제 클릭
         selectors = [
             "div[role='tab']:has-text('사진')",
             "div[role='tab']:has-text('Photo')",
@@ -70,7 +85,7 @@ class TikTokUploader(BaseUploader):
                             target.scroll_into_view_if_needed()
                             target.click(force=True)
                             page.wait_for_timeout(1500)
-                            self.logger.info(f"Playwright 선택자({sel})로 [사진] 탭 클릭 완료")
+                            self.logger.info(f"선택자({sel})로 [사진] 탭 클릭 완료")
                             return True
             except Exception:
                 pass
@@ -103,7 +118,7 @@ class TikTokUploader(BaseUploader):
                 self.logger.info("TikTok 업로드 페이지 로드 확인 중...")
                 page.wait_for_timeout(3000)
 
-                # 사진 업로드인 경우 상단 [사진] 탭 확실하게 전환
+                # 사진 업로드인 경우 상단 [사진] 탭 전환
                 if media_type != "video":
                     self._ensure_photo_tab(page)
 
@@ -113,11 +128,17 @@ class TikTokUploader(BaseUploader):
                     if media_type != "video" and attempt % 3 == 0:
                         self._ensure_photo_tab(page)
 
-                    # 2) 메인 프레임 탐색
-                    direct_inputs = page.locator("input[type='file']")
-                    if direct_inputs.count() > 0:
-                        file_input = direct_inputs.first
-                        break
+                    # 2) 사진 모드 전용 input 우선 탐색
+                    if media_type != "video":
+                        photo_inputs = page.locator("input[type='file'][accept*='image'], input[type='file']")
+                        if photo_inputs.count() > 0:
+                            file_input = photo_inputs.first
+                            break
+                    else:
+                        direct_inputs = page.locator("input[type='file']")
+                        if direct_inputs.count() > 0:
+                            file_input = direct_inputs.first
+                            break
                     
                     # 3) iframe 내부 탐색
                     for frame in page.frames:
@@ -162,57 +183,85 @@ class TikTokUploader(BaseUploader):
                         retry_inputs.first.set_input_files(str(media_path.resolve()))
                         self.logger.info("사진 파일 재첨부 완료!")
 
-                # 영상/사진 업로드 완료 상태 대기 (최대 60초)
-                self.logger.info("미디어 파일 업로드 및 서버 처리 대기 중...")
-                for _ in range(12):
-                    page.wait_for_timeout(3000)
-                    # 1) 사진 모드 URL 전환 감지 또는 업로드 완료 텍스트 확인
-                    is_photo_loaded = (
+                # 영상/사진 업로드 완료 및 세부정보 화면 전환 대기 (최대 60초)
+                self.logger.info("미디어 파일 업로드 및 세부정보 화면 진입 대기 중...")
+                for _ in range(20):
+                    page.wait_for_timeout(2000)
+                    is_loaded = (
                         "photo" in page.url
                         or page.locator("text='사진 1장이 업로드되었습니다', text='업로드됨', text='Uploaded', text='눈에 띄는 제목 추가'").count() > 0
+                        or page.locator("input[placeholder*='제목'], div[contenteditable='true']").count() > 0
                     )
-                    if is_photo_loaded:
-                        self.logger.info("미디어 파일 업로드 완료 확인!")
+                    if is_loaded:
+                        self.logger.info("미디어 파일 업로드 완료 및 세부정보 화면 진입 확인!")
                         break
 
-                # 캡션 및 제목 입력
+                # 캡션 및 제목 데이터 준비
                 title = metadata.get("title", "")
                 content = metadata.get("content", "")
                 tags = metadata.get("tags", "")
                 full_caption = metadata.get("full_caption", "")
                 desc_text = f"{content}\n\n{tags}".strip() if (content or tags) else full_caption
 
-                self.logger.info("제목 및 설명 입력 중...")
-                page.wait_for_timeout(1000)
+                self.logger.info("제목 및 설명(본문) 입력 시작...")
+                page.wait_for_timeout(1500)
 
-                # 1) 사진 모드용 제목(Title) 입력칸 탐색
-                title_inputs = page.locator("input[placeholder*='제목'], input[placeholder*='title']")
+                # 1) 제목(Title) 필드 입력 시도
+                title_filled = False
+                title_inputs = page.locator("input[placeholder*='제목'], input[placeholder*='title'], input[type='text']")
                 if title_inputs.count() > 0 and title:
                     try:
-                        title_inputs.first.fill(title[:90])  # 틱톡 제목 90자 제한
+                        title_target = title_inputs.first
+                        title_target.click()
+                        page.wait_for_timeout(300)
+                        title_target.fill(title[:90])  # 틱톡 제목 90자 제한
                         page.wait_for_timeout(500)
                         self.logger.info(f"제목 입력 완료: {title[:30]}...")
+                        title_filled = True
                     except Exception as e:
-                        self.logger.warning(f"제목 입력 오류 (무시): {e}")
+                        self.logger.warning(f"제목 fill 실패, 키보드 타이핑 시도: {e}")
+                        try:
+                            title_inputs.first.click()
+                            page.keyboard.insert_text(title[:90])
+                            title_filled = True
+                        except Exception:
+                            pass
 
-                # 2) 설명/본문 입력창 탐색
-                caption_boxes = page.locator("div.public-DraftEditor-content, div[contenteditable='true'], div[role='combobox'], textarea")
-                if caption_boxes.count() == 0:
+                # 2) 설명/본문(Description) 필드 입력 시도
+                caption_filled = False
+                # contenteditable div 또는 textarea 탐색
+                caption_candidates = page.locator(
+                    "div.public-DraftEditor-content, div[contenteditable='true'], div[role='combobox'], textarea"
+                )
+                if caption_candidates.count() == 0:
                     for frame in page.frames:
-                        frame_caption = frame.locator("div.public-DraftEditor-content, div[contenteditable='true'], div[role='combobox'], textarea")
-                        if frame_caption.count() > 0:
-                            caption_boxes = frame_caption
+                        frame_cands = frame.locator(
+                            "div.public-DraftEditor-content, div[contenteditable='true'], div[role='combobox'], textarea"
+                        )
+                        if frame_cands.count() > 0:
+                            caption_candidates = frame_cands
                             break
 
-                if caption_boxes.count() > 0:
-                    # 제목 입력칸과 구분하기 위해 가장 마지막 또는 설명 칸 선택
-                    target_box = caption_boxes.last if caption_boxes.count() > 1 else caption_boxes.first
+                if caption_candidates.count() > 0:
+                    # 제목창과 겹치지 않게 선택
+                    target_box = caption_candidates.last if (title_filled and caption_candidates.count() > 1) else caption_candidates.first
                     try:
-                        target_box.fill(desc_text or full_caption)
+                        target_box.click()
+                        page.wait_for_timeout(500)
+                        # DraftJS / contenteditable 지원을 위해 키보드 직접 입력 사용
+                        page.keyboard.press("Control+A")
+                        page.keyboard.press("Backspace")
+                        page.keyboard.insert_text(desc_text or full_caption)
                         page.wait_for_timeout(1500)
-                        self.logger.info("설명 입력 완료!")
+                        self.logger.info("설명(본문) 입력 완료!")
+                        caption_filled = True
                     except Exception as e:
-                        self.logger.warning(f"설명 입력 오류: {e}")
+                        self.logger.warning(f"키보드 텍스트 입력 실패, fill 재시도: {e}")
+                        try:
+                            target_box.fill(desc_text or full_caption)
+                            caption_filled = True
+                        except Exception:
+                            pass
 
                 # 페이지 맨 아래로 스크롤하여 [게시] 버튼 노출
                 self.logger.info("페이지 하단으로 스크롤하여 [게시] 버튼을 탐색합니다...")
@@ -224,11 +273,8 @@ class TikTokUploader(BaseUploader):
                         pass
                 page.wait_for_timeout(2000)
 
-
-
                 # 게시(Post) 버튼 정확히 찾기
                 post_btn = None
-                # 후보 선택자 목록 (우선순위 순)
                 selectors = [
                     "div[class*='btn-post'] button",
                     "div[class*='button-group'] button:has-text('게시')",
@@ -243,7 +289,6 @@ class TikTokUploader(BaseUploader):
                 for sel in selectors:
                     btns = page.locator(sel)
                     if btns.count() > 0:
-                        # 여러 개 중 맨 마지막(보통 폼 맨 하단) 버튼 선택
                         target = btns.last
                         try:
                             if target.is_visible():
@@ -251,7 +296,6 @@ class TikTokUploader(BaseUploader):
                                 break
                         except Exception:
                             pass
-                    # iframe 내부도 확인
                     if not post_btn:
                         for frame in page.frames:
                             frame_btns = frame.locator(sel)
@@ -267,11 +311,10 @@ class TikTokUploader(BaseUploader):
                         break
 
                 if post_btn:
-                    # 버튼이 화면에 보이도록 스크롤 및 활성화 대기
                     post_btn.scroll_into_view_if_needed()
                     page.wait_for_timeout(1000)
 
-                    # 비활성화 상태가 풀릴 때까지 최대 15초 대기
+                    # 비활성화 상태가 풀릴 때까지 대기
                     for _ in range(15):
                         try:
                             if post_btn.is_enabled():
@@ -281,16 +324,15 @@ class TikTokUploader(BaseUploader):
                         page.wait_for_timeout(1000)
 
                     self.logger.info("하단 [게시] 버튼 클릭 시도...")
-                    post_btn.click()
-                    self.logger.info("게시 버튼을 클릭했습니다. 서버 게시 완료 대기 (15초)...")
+                    post_btn.click(force=True)
+                    self.logger.info("게시 버튼을 클릭했습니다. 서버 처리 및 완료 대기 중 (15초)...")
 
-                    # 게시 완료 상태 확인 대기 (모달 또는 완료 텍스트 감지)
+                    # 게시 완료 상태 확인 대기
                     for _ in range(15):
                         page.wait_for_timeout(1000)
-                        # 혹시 '끝낼까요?' 모달이 떴다면 '취소' 클릭
+                        # '끝낼까요?' 모달 방어
                         cancel_modal = page.locator("div[role='dialog'] button:text-is('취소'), button:text-is('취소')")
                         if cancel_modal.count() > 0 and cancel_modal.first.is_visible():
-                            # 모달 취소 누르고 재시도 방지
                             pass
 
                         # 완료 확인 텍스트 탐색
@@ -315,6 +357,7 @@ class TikTokUploader(BaseUploader):
         except Exception as e:
             self.logger.error(f"Playwright TikTok 업로드 실패: {e}")
             return False
+
 
 
 
