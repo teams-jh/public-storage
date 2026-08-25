@@ -56,10 +56,15 @@ class ThreadsUploader(BaseUploader):
             pass
 
         # 방법 2: Playwright 웹 브라우저 자동화
-        return self._upload_via_playwright(media_path, caption)
+        return self._upload_via_playwright(media_path, metadata)
 
-    def _upload_via_playwright(self, media_path: Path, caption: str) -> bool:
+    def _upload_via_playwright(self, media_path: Path, metadata: dict) -> bool:
         try:
+            title = metadata.get("title", "")
+            content = metadata.get("content", "")
+            tags_raw = metadata.get("tags", "")
+            caption = metadata.get("full_caption", "")
+
             from playwright.sync_api import sync_playwright
             user_data_dir = SESSION_DIR / "browser_threads"
             user_data_dir.mkdir(exist_ok=True)
@@ -148,31 +153,109 @@ class ThreadsUploader(BaseUploader):
                         except Exception:
                             pass
 
-                # 1. 모달 내부 내용 입력
+                # 1. 모달 내부 파일 먼저 첨부
+                self.logger.info(f"1단계: {media_type.upper()} 파일({media_path.name}) 첨부 중...")
+                file_input = page.locator("div[role='dialog'] input[type='file'], input[type='file']")
+                if file_input.count() > 0:
+                    try:
+                        file_input.first.set_input_files(str(media_path.resolve()))
+                        # 미디어 처리 대기
+                        render_wait = max(5, int(size_mb * 1.5)) if media_type == "video" else 3
+                        self.logger.info(f"미디어 파일 렌더링 대기 중 ({render_wait}초)...")
+                        page.wait_for_timeout(render_wait * 1000)
+                    except Exception as e:
+                        self.logger.warning(f"파일 첨부 실패: {e}")
+
+                # 2. 본문 텍스트 및 해시태그 순차 입력
+                self.logger.info("2단계: 스레드 내용 및 해시태그 입력 중...")
                 textbox = page.locator("div[role='dialog'] div[role='textbox'], div[role='dialog'] div[contenteditable='true'], div[role='textbox']")
                 if textbox.count() > 0:
                     try:
                         textbox.first.click()
                         page.wait_for_timeout(300)
-                        page.keyboard.insert_text(caption)
-                        page.wait_for_timeout(1000)
-                        self.logger.info("스레드 내용 입력 완료!")
+                        page.keyboard.press("Control+A")
+                        page.keyboard.press("Backspace")
+                        page.wait_for_timeout(200)
+
+                        # 1) 본문 내용 (제목 + 본문) 먼저 입력
+                        body_parts = []
+                        if title:
+                            body_parts.append(title)
+                        if content:
+                            body_parts.append(content)
+                        body_text = "\n\n".join(body_parts).strip()
+
+                        if body_text:
+                            page.keyboard.insert_text(body_text)
+                            page.wait_for_timeout(500)
+
+                        # 2) 해시태그 입력 및 첫 번째 추천값 클릭/Enter 선택
+                        if tags_raw:
+                            tag_list = [t.strip().lstrip("#") for t in tags_raw.split() if t.strip()]
+                            for t in tag_list:
+                                if not t:
+                                    continue
+                                page.keyboard.press("Enter")
+                                page.wait_for_timeout(200)
+                                
+                                # #태그 타이핑
+                                self.logger.info(f"Threads 태그 타이핑: #{t}")
+                                page.keyboard.type(f"#{t}", delay=70)
+                                page.wait_for_timeout(1000)
+
+                                # 드롭다운의 첫 번째 추천값(예: '게임') 강력 클릭 시도
+                                clicked_sug = False
+                                
+                                # 1) JS DOM 검색으로 정확한 태그 텍스트를 가진 첫 번째 항목 클릭
+                                try:
+                                    clicked_sug = page.evaluate("""(targetTag) => {
+                                        const allNodes = Array.from(document.querySelectorAll("div, span, button, li"));
+                                        for (const node of allNodes) {
+                                            const txt = node.textContent ? node.textContent.trim() : "";
+                                            if (txt === targetTag && node.children.length === 0) {
+                                                const rect = node.getBoundingClientRect();
+                                                if (rect.width > 0 && rect.height > 0) {
+                                                    const target = node.closest("div[role='button']") || node.closest("div[tabindex]") || node;
+                                                    target.click();
+                                                    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                                    return true;
+                                                }
+                                            }
+                                        }
+                                        return false;
+                                    }""", t)
+                                    if clicked_sug:
+                                        self.logger.info(f"🎉 Threads 드롭다운 첫 번째 추천값 JS 클릭 완료: {t}")
+                                except Exception as e:
+                                    self.logger.warning(f"JS 태그 클릭 예외: {e}")
+
+                                # 2) Playwright 전역 선택자로 클릭 보조
+                                if not clicked_sug:
+                                    try:
+                                        sug_loc = page.locator(f"div:text-is('{t}'), span:text-is('{t}')")
+                                        if sug_loc.count() > 0:
+                                            sug_loc.first.click(force=True)
+                                            clicked_sug = True
+                                            self.logger.info(f"🎉 Threads 드롭다운 추천값 Playwright 클릭 완료: {t}")
+                                    except Exception:
+                                        pass
+
+                                # 3) 미클릭 시 기본 포커스된 첫 번째 항목에 Enter 전송
+                                if not clicked_sug:
+                                    page.keyboard.press("Enter")
+                                    self.logger.info(f"Threads Enter 키로 첫 번째 추천 태그 확정: {t}")
+
+                                page.wait_for_timeout(800)
+
+                        self.logger.info("스레드 내용 및 태그 입력 완료!")
                     except Exception as e:
                         self.logger.warning(f"스레드 텍스트 입력 실패 (무시): {e}")
-
-                # 2. 모달 내부 파일 첨부 (파일 인풋 찾기)
-                file_input = page.locator("div[role='dialog'] input[type='file'], input[type='file']")
-                if file_input.count() > 0:
-                    self.logger.info(f"{media_type.upper()} 파일 첨부 중...")
-                    file_input.first.set_input_files(str(media_path.resolve()))
-                    # 미디어 처리 대기
-                    render_wait = max(5, int(size_mb * 1.5)) if media_type == "video" else 3
-                    self.logger.info(f"미디어 파일 렌더링 대기 중 ({render_wait}초)...")
-                    page.wait_for_timeout(render_wait * 1000)
 
                 # 3. 우측 하단 [게시] 버튼 강력 클릭 (다중 선택자 + JS 위치 계산 + 단축키)
                 self.logger.info("모달 [게시] 버튼 클릭 시도...")
                 page.wait_for_timeout(1000)
+
+
 
                 clicked_post = False
 

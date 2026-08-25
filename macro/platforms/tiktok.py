@@ -224,10 +224,15 @@ class TikTokUploader(BaseUploader):
                         except Exception:
                             pass
                     
-                    desc_text = f"{content}\n\n{tags}".strip() if (content or tags) else full_caption
+                    base_desc = content.strip() if content else ""
                 else:
-                    # 동영상 모드일 경우: 단일 캡션창에 [제목 + 내용 + 태그] 전체 입력
-                    desc_text = full_caption
+                    # 동영상 모드일 경우: 본문(제목 + 내용)
+                    body_parts = []
+                    if title:
+                        body_parts.append(title)
+                    if content:
+                        body_parts.append(content)
+                    base_desc = "\n\n".join(body_parts).strip()
 
                 # 2) 설명/본문(Description) 필드 입력 (DraftJS 에디터)
                 caption_candidates = page.locator(
@@ -247,19 +252,62 @@ class TikTokUploader(BaseUploader):
                     try:
                         target_box.click()
                         page.wait_for_timeout(500)
-                        # 기존 텍스트 완전 삭제 후 전체 텍스트 주입
+                        # 기존 텍스트 완전 삭제
                         page.keyboard.press("Control+A")
                         page.keyboard.press("Backspace")
                         page.wait_for_timeout(300)
-                        page.keyboard.insert_text(desc_text)
-                        page.wait_for_timeout(1000)
-                        self.logger.info(f"설명(본문) 텍스트 입력 완료!\n--- 입력 내용 ---\n{desc_text}\n-----------------")
+
+                        # 본문 먼저 입력
+                        if base_desc:
+                            page.keyboard.insert_text(base_desc)
+                            page.wait_for_timeout(500)
+
+                        # 해시태그 순차 입력 및 첫 번째 추천값 클릭/Enter 선택
+                        if tags:
+                            tag_list = [t.strip().lstrip("#") for t in tags.split() if t.strip()]
+                            for t in tag_list:
+                                if not t:
+                                    continue
+                                page.keyboard.insert_text(" ")
+                                page.wait_for_timeout(200)
+
+                                # #태그 타이핑
+                                self.logger.info(f"TikTok 태그 타이핑: #{t}")
+                                page.keyboard.type(f"#{t}", delay=60)
+                                page.wait_for_timeout(800)
+
+                                # 드롭다운의 첫 번째 추천값 클릭 시도 또는 Enter
+                                clicked_sug = False
+                                sug_items = page.locator(
+                                    "div[class*='sug-item'], "
+                                    "div[class*='suggestion'], "
+                                    "div[class*='mention-item'], "
+                                    "div[class*='hashtag-item'], "
+                                    "div[role='option'], "
+                                    "div:has-text('#" + t + "')"
+                                )
+                                if sug_items.count() > 0:
+                                    try:
+                                        sug_items.first.click()
+                                        clicked_sug = True
+                                        self.logger.info(f"TikTok 첫 번째 추천 해시태그 클릭 적용: #{t}")
+                                    except Exception:
+                                        pass
+
+                                if not clicked_sug:
+                                    page.keyboard.press("Enter")
+                                    self.logger.info(f"TikTok Enter 키로 해시태그 적용: #{t}")
+
+                                page.wait_for_timeout(500)
+
+                        self.logger.info(f"TikTok 본문 및 해시태그 입력 완료!")
                     except Exception as e:
                         self.logger.warning(f"키보드 텍스트 입력 실패, fill 재시도: {e}")
                         try:
-                            target_box.fill(desc_text)
+                            target_box.fill(f"{base_desc}\n\n{tags}".strip())
                         except Exception:
                             pass
+
 
 
                 # 페이지 맨 아래로 스크롤하여 [게시] 버튼 노출
