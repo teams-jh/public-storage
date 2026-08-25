@@ -73,10 +73,10 @@ class InstagramUploader(BaseUploader):
 
             self.logger.info(f"Playwright 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 세션 유지: {sync_buffer}초)")
             with sync_playwright() as p:
-
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
                     headless=False,  # 첫 로그인/인증을 위해 브라우저 표시
+                    permissions=["clipboard-read", "clipboard-write"],
                     args=["--disable-blink-features=AutomationControlled"]
                 )
                 page = browser.new_page()
@@ -181,78 +181,149 @@ class InstagramUploader(BaseUploader):
                         file_input.first.set_input_files(str(media_path.resolve()))
                         page.wait_for_timeout(3000)
 
-                    # 2. [다음] 버튼들을 순차적으로 클릭하여 캡션(문구 입력) 단계까지 확실하게 전이
-                    self.logger.info("자르기/필터 단계를 통과하여 캡션 입력창으로 이동합니다...")
-                    caption_box = None
-                    for step in range(8):
-                        # 캡션창이 이미 나타났는지 확인
-                        candidates = page.locator(
-                            "div[aria-label*='문구'], "
-                            "div[aria-label*='caption'], "
-                            "div[aria-label*='Write'], "
-                            "div[role='textbox']"
-                        )
-                        if candidates.count() > 0 and candidates.first.is_visible():
-                            caption_box = candidates.first
-                            self.logger.info("캡션(문구) 입력 화면 도달 확인!")
-                            break
-
-                        self.logger.info(f"[{step + 1}단계] '다음' 버튼 클릭 시도...")
-                        # 1) JS DOM 이벤트 직접 전송
+                    # 2. [자르기 -> 필터 -> 캡션] 화면으로 순차 이동
+                    self.logger.info("자르기 및 필터 단계를 거쳐 캡션(문구 입력) 화면으로 이동합니다...")
+                    
+                    # 헬퍼: 모달 우측 상단의 액션 버튼(다음/공유하기) 클릭 함수
+                    def click_header_action(btn_text: str):
                         try:
-                            page.evaluate("""() => {
-                                const elements = Array.from(document.querySelectorAll("div[role='dialog'] div[role='button'], div[role='dialog'] button, div[role='dialog'] span"));
+                            # 1) JS DOM 이벤트 전송
+                            page.evaluate("""(targetText) => {
+                                const dialog = document.querySelector("div[role='dialog']");
+                                if (!dialog) return false;
+                                const elements = Array.from(dialog.querySelectorAll("div[role='button'], button, span"));
                                 for (const el of elements) {
                                     const text = el.textContent ? el.textContent.trim() : "";
-                                    if (text === '다음' || text === 'Next') {
+                                    if (text === targetText || (targetText === '다음' && text === 'Next') || (targetText === '공유하기' && text === 'Share')) {
                                         el.click();
                                         el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
                                         return true;
                                     }
                                 }
                                 return false;
-                            }""")
+                            }""", btn_text)
                         except Exception:
                             pass
-
-                        # 2) Playwright 선택자 강제 클릭
-                        next_btns = page.locator(
-                            "div[role='dialog'] div[role='button']:has-text('다음'), "
-                            "div[role='dialog'] div[role='button']:has-text('Next'), "
-                            "button:has-text('다음'), "
-                            "button:has-text('Next')"
+                        
+                        # 2) Playwright 클릭
+                        btn_loc = page.locator(
+                            f"div[role='dialog'] div[role='button']:has-text('{btn_text}'), "
+                            f"div[role='dialog'] button:has-text('{btn_text}'), "
+                            f"div[role='dialog'] div:text-is('{btn_text}')"
                         )
-                        if next_btns.count() > 0:
+                        if btn_loc.count() > 0:
                             try:
-                                next_btns.first.click(force=True)
+                                btn_loc.first.click(force=True)
                             except Exception:
                                 pass
 
-                        page.wait_for_timeout(2000)
+                    # 1번째 '다음' 클릭 (자르기 -> 필터)
+                    self.logger.info("1단계: 자르기 화면에서 [다음] 클릭...")
+                    click_header_action("다음")
+                    page.wait_for_timeout(2500)
 
-                    # 3. 캡션 입력
-                    if not caption_box:
-                        candidates = page.locator("div[aria-label*='문구'], div[aria-label*='caption'], div[role='textbox'], div[contenteditable='true']")
-                        if candidates.count() > 0:
-                            caption_box = candidates.first
+                    # 2번째 '다음' 클릭 (필터 -> 캡션 입력)
+                    self.logger.info("2단계: 필터 화면에서 [다음] 클릭...")
+                    click_header_action("다음")
+                    page.wait_for_timeout(2500)
 
-                    if caption_box:
+                    # 3단계: [공유하기] 버튼 또는 캡션 입력창이 나타날 때까지 대기
+                    self.logger.info("3단계: 캡션 입력 및 [공유하기] 화면 도달 대기 중...")
+                    for _ in range(10):
+                        has_share = page.locator("div[role='dialog'] div[role='button']:has-text('공유하기'), div[role='dialog'] button:has-text('공유하기'), div[role='dialog'] div:text-is('공유하기')")
+                        if has_share.count() > 0 and has_share.first.is_visible():
+                            break
+                        # 혹시 아직 필터 화면에 머물러 있다면 한 번 더 다음 클릭
+                        click_header_action("다음")
+                        page.wait_for_timeout(1000)
+
+                    # 3. 캡션(문구) 입력창 찾기 및 클립보드(Control+V) 강력 주입
+                    self.logger.info("캡션(문구) 입력창 탐색 및 텍스트 주입 시도...")
+                    
+                    # 브라우저 클립보드에 캡션 복사
+                    try:
+                        page.evaluate("""(text) => navigator.clipboard.writeText(text)""", caption)
+                    except Exception as e:
+                        self.logger.warning(f"클립보드 복사 실패 (무시): {e}")
+
+                    caption_box = page.locator(
+                        "div[role='dialog'] div[contenteditable='true'], "
+                        "div[role='dialog'] div[aria-label*='문구'], "
+                        "div[role='dialog'] div[aria-label*='caption'], "
+                        "div[role='dialog'] div[role='textbox']"
+                    )
+
+                    if caption_box.count() > 0:
                         try:
-                            caption_box.click()
-                            page.wait_for_timeout(300)
-                            page.keyboard.insert_text(caption)
-                            page.wait_for_timeout(1000)
-                            self.logger.info("캡션 내용 입력 완료!")
-                        except Exception as e:
-                            self.logger.warning(f"키보드 입력 실패, fill 시도: {e}")
+                            target_box = caption_box.first
+                            target_box.click(force=True)
+                            page.wait_for_timeout(500)
+                            
+                            # 1) Control+A 후 Backspace
+                            page.keyboard.press("Control+A")
+                            page.keyboard.press("Backspace")
+                            page.wait_for_timeout(200)
+
+                            # 2) 클립보드 붙여넣기 (Control+V)
+                            # 해시태그 입력 후 자동완성 팝업 방지를 위해 끝에 공백 1칸 추가
+                            safe_caption = caption.rstrip() + " "
                             try:
-                                caption_box.fill(caption)
+                                page.evaluate("""(text) => navigator.clipboard.writeText(text)""", safe_caption)
                             except Exception:
                                 pass
+
+                            page.keyboard.press("Control+V")
+                            page.wait_for_timeout(1000)
+
+                            # 3) 만약 내용이 안 들어갔다면 insert_text fallback
+                            entered_text = target_box.inner_text().strip()
+                            if not entered_text and caption.strip():
+                                self.logger.info("Control+V 미반영 감지 -> insert_text 시도...")
+                                page.keyboard.insert_text(safe_caption)
+                                page.wait_for_timeout(1000)
+                                entered_text = target_box.inner_text().strip()
+
+                            # 4) 그래도 안 들어갔다면 execCommand fallback
+                            if not entered_text and caption.strip():
+                                self.logger.info("insert_text 미반영 감지 -> JS execCommand 직접 주입 시도...")
+                                page.evaluate("""(text) => {
+                                    const editor = document.querySelector("div[role='dialog'] div[contenteditable='true']");
+                                    if (editor) {
+                                        editor.focus();
+                                        document.execCommand('selectAll', false, null);
+                                        document.execCommand('insertText', false, text);
+                                    }
+                                }""", safe_caption)
+                                page.wait_for_timeout(1000)
+                                entered_text = target_box.inner_text().strip()
+
+                            # 5) 중요: 해시태그 추천 드롭다운 팝업 닫기 및 포커스 해제 (Blur)
+                            self.logger.info("해시태그 자동완성 추천 팝업 닫기 및 포커스 정리 중...")
+                            page.keyboard.press("Escape")
+                            page.wait_for_timeout(300)
+                            page.keyboard.press("Escape")
+                            page.wait_for_timeout(300)
+                            
+                            # 에디터 포커스 강제 해제 및 모달 빈 영역 클릭
+                            page.evaluate("""() => {
+                                if (document.activeElement && document.activeElement.blur) {
+                                    document.activeElement.blur();
+                                }
+                            }""")
+                            page.wait_for_timeout(500)
+
+                            self.logger.info(f"🎉 Instagram 캡션 입력 완료! (입력된 글자 수: {len(entered_text)}자)")
+                        except Exception as e:
+                            self.logger.warning(f"캡션 입력 중 오류: {e}")
+                    else:
+                        self.logger.warning("⚠️ 캡션 입력창(contenteditable)을 찾지 못했습니다.")
 
                     # 4. [공유하기] 버튼 확실하게 클릭
                     self.logger.info("최종 [공유하기] 버튼 클릭 시도...")
                     page.wait_for_timeout(1500)
+
+
+
                     
                     for _ in range(3):
                         # 1) JS DOM 이벤트 직접 디스패치
