@@ -2,7 +2,10 @@ import os
 import time
 from pathlib import Path
 from platforms.base import BaseUploader
-from config import CONFIG, SESSION_DIR, get_media_type
+from config import (
+    CONFIG, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
+    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
+)
 
 class TikTokUploader(BaseUploader):
     def __init__(self):
@@ -100,7 +103,11 @@ class TikTokUploader(BaseUploader):
 
             caption = metadata.get("full_caption", "")
             media_type = get_media_type(media_path)
-            self.logger.info("TikTok 업로드 브라우저를 실행합니다...")
+            size_mb = get_media_size_mb(media_path)
+            upload_timeout = get_dynamic_upload_timeout(media_path)
+            sync_buffer = get_dynamic_sync_buffer(media_path)
+
+            self.logger.info(f"TikTok 업로드 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 세션 유지: {sync_buffer}초)")
             with sync_playwright() as p:
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
@@ -183,9 +190,9 @@ class TikTokUploader(BaseUploader):
                         retry_inputs.first.set_input_files(str(media_path.resolve()))
                         self.logger.info("사진 파일 재첨부 완료!")
 
-                # 영상/사진 업로드 완료 및 세부정보 화면 전환 대기 (최대 60초)
-                self.logger.info("미디어 파일 업로드 및 세부정보 화면 진입 대기 중...")
-                for _ in range(20):
+                # 영상/사진 업로드 완료 및 세부정보 화면 전환 대기 (최대 upload_timeout초)
+                self.logger.info(f"미디어 파일 업로드 및 세부정보 화면 진입 대기 중 (최대 {upload_timeout}초)...")
+                for _ in range(upload_timeout // 2):
                     page.wait_for_timeout(2000)
                     is_loaded = (
                         "photo" in page.url
@@ -315,7 +322,7 @@ class TikTokUploader(BaseUploader):
                     page.wait_for_timeout(1000)
 
                     # 비활성화 상태가 풀릴 때까지 대기
-                    for _ in range(15):
+                    for _ in range(30):
                         try:
                             if post_btn.is_enabled():
                                 break
@@ -325,10 +332,11 @@ class TikTokUploader(BaseUploader):
 
                     self.logger.info("하단 [게시] 버튼 클릭 시도...")
                     post_btn.click(force=True)
-                    self.logger.info("게시 버튼을 클릭했습니다. 서버 처리 및 완료 대기 중 (15초)...")
+                    self.logger.info(f"게시 버튼을 클릭했습니다. 서버 처리 및 완료 대기 중 (최대 {upload_timeout}초)...")
 
-                    # 게시 완료 상태 확인 대기
-                    for _ in range(15):
+                    # 게시 완료 상태 확인 대기 (최대 upload_timeout초)
+                    post_completed = False
+                    for _ in range(upload_timeout):
                         page.wait_for_timeout(1000)
                         # '끝낼까요?' 모달 방어
                         cancel_modal = page.locator("div[role='dialog'] button:text-is('취소'), button:text-is('취소')")
@@ -341,22 +349,32 @@ class TikTokUploader(BaseUploader):
                             "div:has-text('동영상이 게시되었습니다'), button:has-text('다른 동영상 업로드'), "
                             "button:has-text('게시물 관리'), a:has-text('게시물 관리')"
                         )
-                        if success_indicators.count() > 0:
+                        if success_indicators.count() > 0 and success_indicators.first.is_visible():
                             self.logger.info("🎉 TikTok 게시 완료 확인!")
+                            post_completed = True
                             break
 
-                    page.wait_for_timeout(5000)
-                    self.logger.info("TikTok 업로드 성공 완료!")
-                    browser.close()
-                    return True
+                    if post_completed:
+                        self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
+                        page.wait_for_timeout(sync_buffer * 1000)
+                        self.logger.info("🎉 TikTok 최종 업로드 성공 완료!")
+                        browser.close()
+                        return True
+                    else:
+                        self.logger.warning("TikTok 서버 전송 완료 확인을 받지 못했습니다.")
+                        page.wait_for_timeout(5000)
+                        browser.close()
+                        return False
 
-                self.logger.warning("게시 버튼을 자동으로 클릭하지 못했습니다. 수동으로 확인 후 브라우저를 닫아주세요.")
-                page.wait_for_timeout(15000)
+                self.logger.error("게시 버튼을 찾지 못했습니다.")
+                page.wait_for_timeout(5000)
                 browser.close()
-                return True
+                return False
+
         except Exception as e:
             self.logger.error(f"Playwright TikTok 업로드 실패: {e}")
             return False
+
 
 
 

@@ -2,7 +2,10 @@ import os
 import time
 from pathlib import Path
 from platforms.base import BaseUploader
-from config import CONFIG, SESSION_DIR, get_media_type
+from config import (
+    CONFIG, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
+    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
+)
 
 class TwitterXUploader(BaseUploader):
     def __init__(self):
@@ -86,7 +89,11 @@ class TwitterXUploader(BaseUploader):
             user_data_dir.mkdir(exist_ok=True)
 
             media_type = get_media_type(media_path)
-            self.logger.info("X(Twitter) 브라우저를 실행합니다...")
+            size_mb = get_media_size_mb(media_path)
+            upload_timeout = get_dynamic_upload_timeout(media_path)
+            sync_buffer = get_dynamic_sync_buffer(media_path)
+
+            self.logger.info(f"X(Twitter) 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 세션 유지: {sync_buffer}초)")
             with sync_playwright() as p:
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
@@ -171,9 +178,9 @@ class TwitterXUploader(BaseUploader):
                     self.logger.info(f"{media_type.upper()} 파일 첨부 중...")
                     file_input.first.set_input_files(str(media_path.resolve()))
                     
-                    # 미디어 처리 및 프리뷰 렌더링 대기
-                    self.logger.info("미디어 파일 처리 및 렌더링 대기 중...")
-                    for _ in range(15):
+                    # 미디어 처리 및 프리뷰 렌더링 대기 (대용량 동영상 고려: 최대 upload_timeout초)
+                    self.logger.info(f"미디어 파일 처리 및 렌더링 대기 중 (최대 {upload_timeout}초)...")
+                    for _ in range(upload_timeout // 2):
                         page.wait_for_timeout(2000)
                         has_attachment = page.locator(
                             "div[data-testid='attachments'], "
@@ -213,8 +220,8 @@ class TwitterXUploader(BaseUploader):
 
                 if post_btn.count() > 0:
                     target_btn = post_btn.first
-                    # 비활성화 해제 대기 (최대 20초)
-                    for _ in range(20):
+                    # 비활성화 해제 대기 (최대 30초)
+                    for _ in range(30):
                         try:
                             aria_disabled = target_btn.get_attribute("aria-disabled")
                             if target_btn.is_enabled() and aria_disabled != "true":
@@ -255,25 +262,43 @@ class TwitterXUploader(BaseUploader):
                     except Exception:
                         pass
 
-                    self.logger.info("게시 요청 전송 완료. 서버 처리 및 완료 대기 중 (12초)...")
+                    self.logger.info(f"게시 요청 전송 완료. 서버 처리 및 완료 대기 중 (최대 {upload_timeout}초)...")
                     
-                    # 완료 대기 (모달 닫힘 또는 토스트 메시지 감지)
-                    for _ in range(12):
+                    # 완료 대기 (모달 닫힘 또는 토스트 메시지 감지, 최대 upload_timeout초)
+                    tweet_sent = False
+                    for _ in range(upload_timeout):
                         page.wait_for_timeout(1000)
                         toast = page.locator("div[data-testid='toast']")
                         if toast.count() > 0 and toast.first.is_visible():
                             self.logger.info("🎉 X(Twitter) 게시 토스트 확인!")
+                            tweet_sent = True
+                            break
+                        
+                        # 모달 닫힘 감지
+                        dialog = page.locator("div[role='dialog']")
+                        if dialog.count() == 0:
+                            tweet_sent = True
+                            self.logger.info("🎉 X(Twitter) 작성 모달 닫힘 확인!")
                             break
 
-                    page.wait_for_timeout(3000)
-                    self.logger.info("🎉 X(Twitter) 업로드 최종 성공 완료!")
-                    browser.close()
-                    return True
+                    if tweet_sent:
+                        self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
+                        page.wait_for_timeout(sync_buffer * 1000)
+                        self.logger.info("🎉 X(Twitter) 업로드 최종 성공 완료!")
+                        browser.close()
+                        return True
+                    else:
+                        self.logger.warning("X(Twitter) 서버 완료 상태를 감지하지 못했습니다.")
+                        page.wait_for_timeout(5000)
+                        browser.close()
+                        return False
 
                 self.logger.error("X(Twitter) 게시하기 버튼을 찾을 수 없습니다.")
                 page.wait_for_timeout(5000)
                 browser.close()
                 return False
+
+
 
         except Exception as e:
             self.logger.error(f"Playwright X(Twitter) 업로드 실패: {e}")

@@ -2,7 +2,10 @@ import os
 import time
 from pathlib import Path
 from platforms.base import BaseUploader
-from config import CONFIG, SESSION_DIR, get_media_type
+from config import (
+    CONFIG, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
+    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
+)
 
 class YouTubeUploader(BaseUploader):
     def __init__(self):
@@ -111,7 +114,11 @@ class YouTubeUploader(BaseUploader):
             user_data_dir = SESSION_DIR / "browser_youtube"
             user_data_dir.mkdir(exist_ok=True)
 
-            self.logger.info("YouTube Studio 브라우저를 실행합니다...")
+            size_mb = get_media_size_mb(video_path)
+            upload_timeout = get_dynamic_upload_timeout(video_path)
+            sync_buffer = get_dynamic_sync_buffer(video_path)
+
+            self.logger.info(f"YouTube Studio 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 완료 후 세션유지: {sync_buffer}초)")
             with sync_playwright() as p:
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
@@ -123,10 +130,15 @@ class YouTubeUploader(BaseUploader):
                 page.wait_for_timeout(3000)
 
 
-                # 로그인 확인
+                # 로그인 확인 (최대 180초 대기)
                 if "accounts.google.com" in page.url:
-                    self.logger.info("Google 로그인이 필요합니다. 브라우저에서 로그인해 주세요 (60초 대기)...")
-                    page.wait_for_url("https://studio.youtube.com/**", timeout=60000)
+                    self.logger.info(f"Google 로그인이 필요합니다. 브라우저에서 로그인해 주세요 (최대 {LOGIN_TIMEOUT_SECONDS}초 대기)...")
+                    try:
+                        page.wait_for_url("https://studio.youtube.com/**", timeout=LOGIN_TIMEOUT_SECONDS * 1000)
+                    except Exception:
+                        self.logger.error("YouTube 로그인 대기 시간이 초과되었습니다.")
+                        browser.close()
+                        return False
 
                 self.logger.info("만들기 버튼 클릭 및 파일 업로드...")
                 page.wait_for_timeout(3000)
@@ -145,30 +157,43 @@ class YouTubeUploader(BaseUploader):
                 file_input = page.locator("input[type='file']")
                 if file_input.count() > 0:
                     file_input.first.set_input_files(str(video_path.resolve()))
-                    self.logger.info("비디오 업로드 중... 세부정보 입력 대기")
+                    self.logger.info(f"동영상 파일 첨부 완료! 서버 업로드 및 인코딩 진행 대기 중 (최대 {upload_timeout}초)...")
                     page.wait_for_timeout(5000)
 
                     # 제목 입력
                     title_input = page.locator("#title-textarea #textbox")
                     if title_input.count() > 0:
                         title_input.first.fill(title)
+                        self.logger.info("동영상 제목 입력 완료")
 
                     # 설명 입력
                     desc_input = page.locator("#description-textarea #textbox")
                     if desc_input.count() > 0:
                         desc_input.first.fill(description)
+                        self.logger.info("동영상 설명 입력 완료")
 
                     # '아동용이 아닙니다' 라디오 버튼 클릭
                     not_for_kids = page.locator("tp-yt-paper-radio-button[name='VIDEO_MADE_FOR_KIDS_NOT_MFK']")
                     if not_for_kids.count() > 0:
                         not_for_kids.first.click()
 
-                    # 다음 버튼 3회 클릭
-                    for _ in range(3):
+                    # 유튜브 하단 서버 업로드 완료율 대기 (0% -> 100% / 업로드 완료 / 처리 중)
+                    self.logger.info("YouTube 서버로 동영상 파일 전송 완료 대기 중...")
+                    for _ in range(upload_timeout // 3):
+                        page.wait_for_timeout(3000)
+                        upload_status = page.locator("span.progress-label, div.progress-label, span:has-text('업로드 완료'), span:has-text('처리 완료'), span:has-text('검사 완료')")
+                        if upload_status.count() > 0:
+                            status_text = upload_status.first.inner_text()
+                            if any(k in status_text for k in ["업로드 완료", "처리", "검사", "완료", "100%"]):
+                                self.logger.info(f"동영상 업로드 상태 확인: {status_text}")
+                                break
+
+                    # 다음 버튼 3회 클릭 (세부정보 -> 동영상 요소 -> 검사 -> 공개 상태)
+                    for step in range(3):
                         next_btn = page.locator("#next-button")
                         if next_btn.count() > 0:
                             next_btn.first.click()
-                            page.wait_for_timeout(1500)
+                            page.wait_for_timeout(2000)
 
                     # 공개(Public) 라디오 버튼 클릭
                     public_radio = page.locator("tp-yt-paper-radio-button[name='PUBLIC']")
@@ -176,19 +201,50 @@ class YouTubeUploader(BaseUploader):
                         public_radio.first.click()
                         page.wait_for_timeout(1000)
 
-                    # 게시(Done) 버튼 클릭
+                    # 게시(Done/Save) 버튼 클릭
                     done_btn = page.locator("#done-button")
                     if done_btn.count() > 0:
                         done_btn.first.click()
-                        self.logger.info("게시 버튼 클릭 완료! 처리 대기 (10초)...")
-                        page.wait_for_timeout(10000)
-                        self.logger.info("YouTube 업로드 성공 완료!")
-                        browser.close()
-                        return True
+                        self.logger.info(f"게시(Done) 버튼 클릭 완료! 서버 최종 게시 및 링크 생성 대기 중 (최대 {upload_timeout}초)...")
+                        
+                        # 업로드 완료 및 링크 생성 확인 대기 (최대 upload_timeout초)
+                        yt_done = False
+                        for _ in range(upload_timeout):
+                            page.wait_for_timeout(1000)
+                            # 완료 다이얼로그에 유튜브 링크 또는 닫기 버튼이 생성된 경우
+                            yt_link = page.locator("a[href*='youtu.be'], a.ytcp-video-info")
+                            close_btn = page.locator("#close-button, button:has-text('닫기'), button:has-text('Close')")
+                            
+                            if yt_link.count() > 0:
+                                href = yt_link.first.get_attribute("href") or ""
+                                self.logger.info(f"🎉 YouTube 동영상 게시 완료! 링크: {href}")
+                                yt_done = True
+                                break
+                            elif close_btn.count() > 0 and close_btn.first.is_visible():
+                                yt_done = True
+                                self.logger.info("🎉 YouTube 동영상 게시 완료 확인 (완료 창 노출)!")
+                                break
 
-                page.wait_for_timeout(10000)
+                        if yt_done:
+                            # 백그라운드 전송 유실 방지를 위한 파일 크기 비례 안전 대기
+                            self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
+                            page.wait_for_timeout(sync_buffer * 1000)
+                            self.logger.info("🎉 YouTube 최종 업로드 성공 완료!")
+                            browser.close()
+                            return True
+                        else:
+                            self.logger.warning("YouTube 서버 처리 완료 확인을 받지 못했습니다.")
+                            page.wait_for_timeout(5000)
+                            browser.close()
+                            return False
+
+                self.logger.error("YouTube 업로드 input을 찾지 못했습니다.")
+                page.wait_for_timeout(5000)
                 browser.close()
-                return True
+                return False
+
+
+
         except Exception as e:
             self.logger.error(f"Playwright YouTube 업로드 실패: {e}")
             return False

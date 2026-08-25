@@ -12,7 +12,52 @@ SESSION_DIR.mkdir(exist_ok=True)
 # .env 로드
 load_dotenv(BASE_DIR / ".env")
 
+# ==========================================
+# Global Timeout Constants & Dynamic Helpers
+# ==========================================
+# 기본 업로드 제한시간 (초 단위: 180초 = 3분)
+UPLOAD_TIMEOUT_SECONDS = 180
+
+# 로그인 및 2단계 인증 대기 최대 시간 (초 단위: 180초 = 3분)
+LOGIN_TIMEOUT_SECONDS = 180
+
+def get_media_size_mb(filepath: Path) -> float:
+    """미디어 파일 크기를 MB 단위(실수)로 반환합니다."""
+    if not filepath.exists():
+        return 0.0
+    return filepath.stat().st_size / (1024 * 1024)
+
+def get_dynamic_upload_timeout(filepath: Path) -> int:
+    """
+    미디어 파일 크기 및 종류에 따른 동적 업로드 제한시간을 계산합니다 (초 단위).
+    - 사진/이미지: 기본 180초 (3분)
+    - 동영상: 용량(MB)에 비례하여 동적 확장 (기본 180초 + 1MB당 5초, 최대 1800초 = 30분)
+      예: 10MB -> 230초, 50MB -> 430초, 100MB -> 680초
+    """
+    if not is_video(filepath):
+        return UPLOAD_TIMEOUT_SECONDS
+    
+    size_mb = get_media_size_mb(filepath)
+    dynamic_timeout = max(UPLOAD_TIMEOUT_SECONDS, int(size_mb * 5) + 180)
+    return min(1800, dynamic_timeout)
+
+def get_dynamic_sync_buffer(filepath: Path) -> int:
+    """
+    업로드 및 게시 완료 후 백그라운드 패킷 유실을 방지하기 위한 세션 유지 대기시간을 계산합니다 (초 단위).
+    - 사진/이미지: 20초 넉넉 대기
+    - 동영상: 용량(MB)에 비례하여 30초 ~ 180초(3분)까지 넉넉하게 세션 유지
+      예: 10MB -> 40초, 50MB -> 80초, 100MB -> 130초
+    """
+    if not is_video(filepath):
+        return 20
+    
+    size_mb = get_media_size_mb(filepath)
+    dynamic_buffer = max(30, int(size_mb * 1) + 30)
+    return min(180, dynamic_buffer)
+
+
 # 자격 증명 설정
+
 CONFIG = {
     # Instagram & Threads
     "INSTAGRAM_USERNAME": os.getenv("INSTAGRAM_USERNAME", ""),

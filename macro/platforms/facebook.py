@@ -3,7 +3,10 @@ import time
 from pathlib import Path
 import requests
 from platforms.base import BaseUploader
-from config import CONFIG, SESSION_DIR, get_media_type
+from config import (
+    CONFIG, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
+    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
+)
 
 class FacebookUploader(BaseUploader):
     def __init__(self):
@@ -68,7 +71,11 @@ class FacebookUploader(BaseUploader):
             user_data_dir.mkdir(exist_ok=True)
 
             media_type = get_media_type(media_path)
-            self.logger.info("Facebook 브라우저를 실행합니다...")
+            size_mb = get_media_size_mb(media_path)
+            upload_timeout = get_dynamic_upload_timeout(media_path)
+            sync_buffer = get_dynamic_sync_buffer(media_path)
+
+            self.logger.info(f"Facebook 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 세션 유지: {sync_buffer}초)")
             with sync_playwright() as p:
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
@@ -122,24 +129,53 @@ class FacebookUploader(BaseUploader):
                     file_input = page.locator("input[type='file']")
                     if file_input.count() > 0:
                         file_input.first.set_input_files(str(media_path.resolve()))
-                        wait_sec = 15 if media_type == "video" else 5
-                        self.logger.info(f"{media_type.capitalize()} 업로드 및 처리 대기 ({wait_sec}초)...")
-                        page.wait_for_timeout(wait_sec * 1000)
+                        render_wait = max(5, int(size_mb * 1.5)) if media_type == "video" else 3
+                        self.logger.info(f"{media_type.capitalize()} 업로드 및 렌더링 대기 중 ({render_wait}초)...")
+                        page.wait_for_timeout(render_wait * 1000)
 
                     # 게시 버튼 클릭
                     post_btn = page.locator("div[aria-label='게시'], div[aria-label='Post']")
                     if post_btn.count() > 0:
-                        post_btn.first.click(force=True)
-                        self.logger.info("게시 중... 완료 대기 (10초)")
-                        page.wait_for_timeout(10000)
-                        self.logger.info("🎉 Facebook 업로드 성공 완료!")
-                        browser.close()
-                        return True
+                        target_btn = post_btn.first
+                        for _ in range(30):
+                            try:
+                                if target_btn.is_enabled():
+                                    break
+                            except Exception:
+                                pass
+                            page.wait_for_timeout(1000)
+
+                        target_btn.click(force=True)
+                        self.logger.info(f"게시 중... 서버 완료 대기 중 (최대 {upload_timeout}초)...")
+                        
+                        # 게시 완료 상태 확인 (최대 upload_timeout초)
+                        fb_done = False
+                        for _ in range(upload_timeout):
+                            page.wait_for_timeout(1000)
+                            dialog = page.locator("div[role='dialog']")
+                            if dialog.count() == 0:
+                                fb_done = True
+                                self.logger.info("🎉 Facebook 작성 모달이 닫혀 게시가 완료되었습니다!")
+                                break
+
+                        if fb_done:
+                            self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
+                            page.wait_for_timeout(sync_buffer * 1000)
+                            self.logger.info("🎉 Facebook 업로드 최종 성공 완료!")
+                            browser.close()
+                            return True
+                        else:
+                            self.logger.warning("Facebook 서버 전송 완료 확인을 받지 못했습니다.")
+                            page.wait_for_timeout(5000)
+                            browser.close()
+                            return False
 
                 self.logger.error("Facebook 게시 버튼을 찾을 수 없습니다.")
                 page.wait_for_timeout(5000)
                 browser.close()
                 return False
+
+
         except Exception as e:
             self.logger.error(f"Playwright Facebook 업로드 실패: {e}")
             return False
