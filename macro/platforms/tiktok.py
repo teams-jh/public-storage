@@ -407,7 +407,7 @@ class TikTokUploader(BaseUploader):
 
                     # 게시 완료 상태 확인 대기 (최대 upload_timeout초)
                     post_completed = False
-                    for _ in range(upload_timeout):
+                    for wait_i in range(upload_timeout):
                         page.wait_for_timeout(1000)
 
                         # 1) '계속 게시할까요?' / '잠재적 문제에 대한 검사' 팝업 감지 시 [지금 게시] 자동 클릭
@@ -452,14 +452,57 @@ class TikTokUploader(BaseUploader):
                             except Exception:
                                 pass
 
-                        # 2) 완료 확인 텍스트 탐색
+                        # 2) URL 리다이렉트 감지 (콘텐츠 관리 페이지 /tiktokstudio/content 또는 /creator-center/content 등으로 이동)
+                        current_url = page.url
+                        if any(path in current_url for path in ["/content", "/manage", "/tiktokstudio/content", "/creator-center/content", "/creator-center/manage"]):
+                            self.logger.info(f"🎉 TikTok 콘텐츠 관리 페이지 URL 전환 감지 완료! ({current_url})")
+                            post_completed = True
+                            break
+
+                        # 3) 콘텐츠 관리 화면 또는 게시 완료 화면 DOM 텍스트 감지
+                        is_done_by_dom = False
+                        try:
+                            is_done_by_dom = page.evaluate("""() => {
+                                const bodyText = document.body.innerText || "";
+                                const indicators = [
+                                    "콘텐츠 (제작일)",
+                                    "콘텐츠(제작일)",
+                                    "게시물 설명 검색",
+                                    "콘텐츠 검토 중",
+                                    "동영상이 게시되었습니다",
+                                    "동영상이 업로드되었습니다",
+                                    "사진이 게시되었습니다",
+                                    "게시되었습니다",
+                                    "업로드 완료",
+                                    "다른 동영상 업로드",
+                                    "게시물 관리",
+                                    "Your video has been uploaded",
+                                    "Your photo has been uploaded",
+                                    "Your post has been published",
+                                    "Manage your posts",
+                                    "Upload another video"
+                                ];
+                                return indicators.some(kw => bodyText.includes(kw));
+                            }""")
+                        except Exception:
+                            pass
+
+                        if is_done_by_dom and wait_i >= 2:
+                            self.logger.info("🎉 TikTok 게시 완료 및 콘텐츠 관리 화면 감지 완료!")
+                            post_completed = True
+                            break
+
+                        # 4) 완료 확인 선택자 탐색
                         success_indicators = page.locator(
                             "div:has-text('게시되었습니다'), div:has-text('업로드 완료'), "
-                            "div:has-text('동영상이 게시되었습니다'), button:has-text('다른 동영상 업로드'), "
-                            "button:has-text('게시물 관리'), a:has-text('게시물 관리')"
+                            "div:has-text('동영상이 게시되었습니다'), div:has-text('콘텐츠 (제작일)'), "
+                            "div:has-text('콘텐츠 검토 중'), div:has-text('게시물 설명 검색'), "
+                            "button:has-text('다른 동영상 업로드'), "
+                            "button:has-text('게시물 관리'), a:has-text('게시물 관리'), "
+                            "a[href*='/content'], a[href*='/tiktokstudio/content']"
                         )
-                        if success_indicators.count() > 0 and success_indicators.first.is_visible():
-                            self.logger.info("🎉 TikTok 게시 완료 확인!")
+                        if success_indicators.count() > 0 and success_indicators.first.is_visible() and wait_i >= 2:
+                            self.logger.info("🎉 TikTok 게시 완료 요소 감지 확인!")
                             post_completed = True
                             break
 
