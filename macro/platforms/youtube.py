@@ -28,13 +28,22 @@ class YouTubeUploader(BaseUploader):
             return True
 
         title = metadata.get("title", media_path.stem)
-        description = metadata.get("full_caption", "")
+        content = metadata.get("content", "")
         tags_raw = metadata.get("tags", "")
         # 해시태그 목록 추출
         tags = [t.strip("# ").strip() for t in tags_raw.split() if t.strip()]
 
+        # 유튜브 설명(Description)에는 [TITLE]을 제외하고 [CONTENT]와 [TAGS]만 포함
+        desc_parts = []
+        if content:
+            desc_parts.append(content)
+        if tags_raw:
+            desc_parts.append(tags_raw)
+        description = "\n\n".join(desc_parts).strip()
+
         self.logger.info(f"YouTube 업로드 시작: {media_path.name}")
         self.logger.info(f"제목: {title}")
+        self.logger.info(f"설명 내용 요약:\n{description[:100]}...")
 
         # 방법 1: YouTube Data API v3
         secrets_path = Path(self.client_secrets_file)
