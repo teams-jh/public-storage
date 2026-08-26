@@ -90,13 +90,14 @@ CONFIG = {
 
 def parse_input_file(filepath: Path = INPUT_FILE) -> dict:
     """
-    input.txt 파일을 파싱하여 title, content, tags 및 통합 caption을 반환합니다.
+    input.txt 파일을 파싱하여 title, content, tags, ratio 및 통합 caption을 반환합니다.
     """
     if not filepath.exists():
         return {
             "title": "",
             "content": "",
             "tags": "",
+            "ratio": "9:16",
             "full_caption": ""
         }
     
@@ -105,11 +106,12 @@ def parse_input_file(filepath: Path = INPUT_FILE) -> dict:
     title = ""
     content = ""
     tags = ""
+    ratio = ""
     
-    # 섹션 태그([TITLE], [CONTENT], [TAGS])가 있는 경우 분리 파싱
-    if "[TITLE]" in raw_text or "[CONTENT]" in raw_text or "[TAGS]" in raw_text:
+    # 섹션 태그([TITLE], [CONTENT], [TAGS], [RATIO])가 있는 경우 분리 파싱
+    if "[TITLE]" in raw_text or "[CONTENT]" in raw_text or "[TAGS]" in raw_text or "[RATIO]" in raw_text:
         current_section = None
-        sections = {"[TITLE]": [], "[CONTENT]": [], "[TAGS]": []}
+        sections = {"[TITLE]": [], "[CONTENT]": [], "[TAGS]": [], "[RATIO]": []}
         
         for line in raw_text.splitlines():
             line_strip = line.strip()
@@ -121,6 +123,7 @@ def parse_input_file(filepath: Path = INPUT_FILE) -> dict:
         title = "\n".join(sections["[TITLE]"]).strip()
         content = "\n".join(sections["[CONTENT]"]).strip()
         tags = "\n".join(sections["[TAGS]"]).strip()
+        ratio = "\n".join(sections["[RATIO]"]).strip()
     else:
         # 섹션 태그가 없는 경우 첫 줄을 제목, 나머지를 본문으로 처리
         lines = raw_text.splitlines()
@@ -142,6 +145,7 @@ def parse_input_file(filepath: Path = INPUT_FILE) -> dict:
         "title": title or "업로드 영상",
         "content": content or raw_text,
         "tags": tags,
+        "ratio": ratio or "9:16",
         "full_caption": full_caption or raw_text
     }
 

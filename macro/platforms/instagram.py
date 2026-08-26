@@ -58,10 +58,13 @@ class InstagramUploader(BaseUploader):
 
 
         # 방법 2: Playwright 웹 브라우저 자동화
-        return self._upload_via_playwright(media_path, caption)
+        return self._upload_via_playwright(media_path, metadata)
 
-    def _upload_via_playwright(self, media_path: Path, caption: str) -> bool:
+    def _upload_via_playwright(self, media_path: Path, metadata: dict) -> bool:
         try:
+            caption = metadata.get("full_caption", "")
+            target_ratio = metadata.get("ratio", "9:16").strip()
+
             from playwright.sync_api import sync_playwright
             user_data_dir = SESSION_DIR / "browser_insta"
             user_data_dir.mkdir(exist_ok=True)
@@ -71,7 +74,7 @@ class InstagramUploader(BaseUploader):
             upload_timeout = get_dynamic_upload_timeout(media_path)
             sync_buffer = get_dynamic_sync_buffer(media_path)
 
-            self.logger.info(f"Playwright 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 세션 유지: {sync_buffer}초)")
+            self.logger.info(f"Playwright 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 세션 유지: {sync_buffer}초, 설정 비율: {target_ratio})")
             with sync_playwright() as p:
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
@@ -180,6 +183,103 @@ class InstagramUploader(BaseUploader):
                         self.logger.info("미디어 파일 첨부 중...")
                         file_input.first.set_input_files(str(media_path.resolve()))
                         page.wait_for_timeout(3000)
+
+                    # 1-1. 화면 비율(9:16 등) 선택 (자르기 화면)
+                    if target_ratio:
+                        self.logger.info(f"화면 비율 설정 시도 ({target_ratio})...")
+                        try:
+                            # 1) 모달 내 좌측 하단의 '자르기 선택' (Crop) 버튼 클릭
+                            crop_clicked = False
+                            try:
+                                crop_clicked = page.evaluate("""() => {
+                                    const dialog = document.querySelector("div[role='dialog']");
+                                    if (!dialog) return false;
+                                    
+                                    // 1. svg aria-label 검사
+                                    const svgs = Array.from(dialog.querySelectorAll("svg"));
+                                    for (const svg of svgs) {
+                                        const label = (svg.getAttribute("aria-label") || "").toLowerCase();
+                                        if (label.includes("자르기") || label.includes("crop") || label.includes("비율") || label.includes("ratio")) {
+                                            const btn = svg.closest("button") || svg.closest("div[role='button']") || svg;
+                                            btn.click();
+                                            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                            return true;
+                                        }
+                                    }
+                                    
+                                    // 2. 모달 좌측 하단 둥근 버튼 검색
+                                    const buttons = Array.from(dialog.querySelectorAll("button, div[role='button']"));
+                                    const dRect = dialog.getBoundingClientRect();
+                                    for (const btn of buttons) {
+                                        const bRect = btn.getBoundingClientRect();
+                                        if (
+                                            bRect.left - dRect.left < dRect.width * 0.35 &&
+                                            bRect.bottom > dRect.top + dRect.height * 0.65 &&
+                                            bRect.width >= 20 && bRect.width <= 70 &&
+                                            bRect.height >= 20 && bRect.height <= 70
+                                        ) {
+                                            btn.click();
+                                            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                            return true;
+                                        }
+                                    }
+                                    return false;
+                                }""")
+                            except Exception as e:
+                                self.logger.warning(f"JS 자르기 버튼 클릭 예외: {e}")
+
+                            if not crop_clicked:
+                                crop_loc = page.locator(
+                                    "div[role='dialog'] svg[aria-label*='자르기'], "
+                                    "div[role='dialog'] svg[aria-label*='Crop'], "
+                                    "div[role='dialog'] svg[aria-label*='crop']"
+                                )
+                                if crop_loc.count() > 0:
+                                    crop_loc.first.click(force=True)
+                                    crop_clicked = True
+
+                            page.wait_for_timeout(800)
+
+                            # 2) 팝업 메뉴에서 지정된 비율 (예: '9:16') 클릭
+                            ratio_clicked = False
+                            try:
+                                ratio_clicked = page.evaluate("""(targetRatio) => {
+                                    const dialog = document.querySelector("div[role='dialog']") || document.body;
+                                    const elements = Array.from(dialog.querySelectorAll("button, div[role='button'], div, span"));
+                                    for (const el of elements) {
+                                        const txt = el.textContent ? el.textContent.trim() : "";
+                                        if (txt === targetRatio) {
+                                            const clickable = el.closest("button") || el.closest("div[role='button']") || el;
+                                            clickable.click();
+                                            clickable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                            return true;
+                                        }
+                                    }
+                                    return false;
+                                }""", target_ratio)
+                            except Exception as e:
+                                self.logger.warning(f"JS 비율 선택 예외: {e}")
+
+                            if not ratio_clicked:
+                                ratio_loc = page.locator(
+                                    f"div[role='dialog'] span:text-is('{target_ratio}'), "
+                                    f"div[role='dialog'] div:text-is('{target_ratio}'), "
+                                    f"div[role='dialog'] button:has-text('{target_ratio}'), "
+                                    f"span:text-is('{target_ratio}'), "
+                                    f"div:text-is('{target_ratio}')"
+                                )
+                                if ratio_loc.count() > 0:
+                                    ratio_loc.first.click(force=True)
+                                    ratio_clicked = True
+
+                            if ratio_clicked:
+                                self.logger.info(f"🎉 Instagram 화면 비율 설정 완료: {target_ratio}")
+                            else:
+                                self.logger.warning(f"Instagram 화면 비율({target_ratio}) 버튼을 찾지 못했습니다.")
+
+                            page.wait_for_timeout(1000)
+                        except Exception as e:
+                            self.logger.warning(f"비율 설정 중 예외 발생 (무시): {e}")
 
                     # 2. [자르기 -> 필터 -> 캡션] 화면으로 순차 이동
                     self.logger.info("자르기 및 필터 단계를 거쳐 캡션(문구 입력) 화면으로 이동합니다...")

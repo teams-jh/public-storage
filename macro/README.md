@@ -57,7 +57,7 @@ playwright install chromium
 ## 📝 2. 입력 데이터 설정
 
 ### `input.txt` 작성법
-`macro/input.txt` 파일에 아래와 같이 `[TITLE]`, `[CONTENT]`, `[TAGS]` 형식으로 작성합니다:
+`macro/input.txt` 파일에 아래와 같이 `[TITLE]`, `[CONTENT]`, `[TAGS]`, `[RATIO]` 형식으로 작성합니다:
 
 ```txt
 [TITLE]
@@ -69,7 +69,15 @@ playwright install chromium
 
 [TAGS]
 #일상 #피드 #소통 #릴스 #쇼츠 #틱톡 #shorts #reels #tiktok
+
+[RATIO]
+9:16
 ```
+> **💡 비율(RATIO) 설정:**
+> - `9:16`: 인스타그램 릴스/세로 화면 기본 비율 (기본값)
+> - `1:1`: 정사각형 피드 비율
+> - `16:9`: 가로 비율
+> - `원본`: 미디어 원본 비율 유지
 
 ### 미디어 파일 배치
 업로드할 파일(`sample.mp4`, `image.jpg`, `animation.gif` 등)을 `macro/upload/` 폴더에 넣어둡니다.

@@ -189,17 +189,16 @@ class ThreadsUploader(BaseUploader):
                             page.keyboard.insert_text(body_text)
                             page.wait_for_timeout(500)
 
-                        # 2) 해시태그 입력 및 첫 번째 추천값 클릭/Enter 선택
+                        # 2) 해시태그 입력 (스레드는 여러 태그 중 첫 번째 태그만 적용) 및 추천값 선택
                         if tags_raw:
                             tag_list = [t.strip().lstrip("#") for t in tags_raw.split() if t.strip()]
-                            for t in tag_list:
-                                if not t:
-                                    continue
+                            if tag_list:
+                                t = tag_list[0]  # 첫 번째 태그만 사용
                                 page.keyboard.press("Enter")
                                 page.wait_for_timeout(200)
                                 
                                 # #태그 타이핑
-                                self.logger.info(f"Threads 태그 타이핑: #{t}")
+                                self.logger.info(f"Threads 태그 타이핑 (첫 번째 태그만 적용): #{t}")
                                 page.keyboard.type(f"#{t}", delay=70)
                                 page.wait_for_timeout(1000)
 

@@ -66,6 +66,8 @@ def main():
     print(f"\n📄 [1] input.txt 로드 완료:")
     print(f" - 제목(Title): {metadata['title']}")
     print(f" - 내용 요약:\n{metadata['content'][:120]}...")
+    if metadata.get('ratio'):
+        print(f" - 비율(Ratio): {metadata['ratio']}")
     if metadata['tags']:
         print(f" - 태그(Tags): {metadata['tags']}")
 
