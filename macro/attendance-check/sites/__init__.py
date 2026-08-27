@@ -2,6 +2,11 @@ from typing import Dict, Optional, Type
 
 from sites.base import BaseAttendanceChecker
 from sites.chilsung import ChilsungAttendanceChecker
+from sites.kdisk import KdiskAttendanceChecker
+from sites.ondisk import OndiskAttendanceChecker
+from sites.filejo import FilejoAttendanceChecker
+from sites.filecity import FilecityAttendanceChecker
+from sites.sharebox import ShareboxAttendanceChecker
 
 # 사이트 식별자(site_key 및 사이트 이름) 매핑 레지스트리
 SITE_REGISTRY: Dict[str, Type[BaseAttendanceChecker]] = {
@@ -9,6 +14,26 @@ SITE_REGISTRY: Dict[str, Type[BaseAttendanceChecker]] = {
     "chilsung": ChilsungAttendanceChecker,
     "칠성몰": ChilsungAttendanceChecker,
     "lottechilsung": ChilsungAttendanceChecker,
+    # 케이디스크 (KDISK)
+    "kdisk": KdiskAttendanceChecker,
+    "k-disk": KdiskAttendanceChecker,
+    "케이디스크": KdiskAttendanceChecker,
+    # 온디스크 (OnDisk)
+    "ondisk": OndiskAttendanceChecker,
+    "on-disk": OndiskAttendanceChecker,
+    "온디스크": OndiskAttendanceChecker,
+    # 파일조 (FileJo)
+    "filejo": FilejoAttendanceChecker,
+    "file-jo": FilejoAttendanceChecker,
+    "파일조": FilejoAttendanceChecker,
+    # 파일시티 (FileCity)
+    "filecity": FilecityAttendanceChecker,
+    "file-city": FilecityAttendanceChecker,
+    "파일시티": FilecityAttendanceChecker,
+    # 쉐어박스 (ShareBox)
+    "sharebox": ShareboxAttendanceChecker,
+    "share-box": ShareboxAttendanceChecker,
+    "쉐어박스": ShareboxAttendanceChecker,
 }
 
 
@@ -23,4 +48,14 @@ def get_checker(site_key_or_name: str) -> Optional[BaseAttendanceChecker]:
     return None
 
 
-__all__ = ["BaseAttendanceChecker", "ChilsungAttendanceChecker", "get_checker", "SITE_REGISTRY"]
+__all__ = [
+    "BaseAttendanceChecker",
+    "ChilsungAttendanceChecker",
+    "KdiskAttendanceChecker",
+    "OndiskAttendanceChecker",
+    "FilejoAttendanceChecker",
+    "FilecityAttendanceChecker",
+    "ShareboxAttendanceChecker",
+    "get_checker",
+    "SITE_REGISTRY",
+]

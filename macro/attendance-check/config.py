@@ -22,7 +22,7 @@ SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 # Browser & Automation Constants
 # ==========================================
 DEFAULT_TIMEOUT_MS = 30000
-DEFAULT_HEADLESS = True
+DEFAULT_HEADLESS = False  # 기본값: 브라우저 창 화면에 표시 (Headed 모드)
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "

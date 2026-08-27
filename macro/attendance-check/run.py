@@ -54,7 +54,9 @@ def print_summary_table(results: List[Dict[str, Any]]):
 
 def run_attendance(
     target_site: str = None,
-    headed: bool = False,
+    headed: bool = True,
+    slow_mo: int = 0,
+    channel: str = "chrome",
     info_file_path: Path = SITE_INFO_PATH
 ) -> int:
     """
@@ -94,12 +96,33 @@ def run_attendance(
             logger.warning("실행 가능한 활성 사이트가 없습니다.")
         return 0
 
-    logger.info(f"총 {len(run_list)}개 사이트 출석체크를 시작합니다. (헤드리스: {not headed})")
+    effective_slow_mo = slow_mo if slow_mo > 0 else (600 if headed else 0)
+    logger.info(
+        f"총 {len(run_list)}개 사이트 출석체크를 시작합니다. "
+        f"(브라우저 창 표시: {'화면 표시 모드(기본)' if headed else '헤드리스(백그라운드)'}, 채널: {channel or 'chromium'}, 속도지연: {effective_slow_mo}ms)"
+    )
 
     results: List[Dict[str, Any]] = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not headed)
+        # 브라우저 실행 (Chrome 채널 우선, 실패 시 기본 Chromium 사용)
+        launch_kwargs = {
+            "headless": not headed,
+            "slow_mo": effective_slow_mo,
+        }
+        if channel:
+            launch_kwargs["channel"] = channel
+
+        try:
+            browser = p.chromium.launch(**launch_kwargs)
+        except Exception as e:
+            if channel:
+                logger.warning(f"'{channel}' 채널 실행 실패({e}), 기본 chromium으로 실행합니다.")
+                launch_kwargs.pop("channel", None)
+                browser = p.chromium.launch(**launch_kwargs)
+            else:
+                raise e
+
         context = browser.new_context(
             user_agent=DEFAULT_USER_AGENT,
             viewport=DEFAULT_VIEWPORT,
@@ -122,6 +145,11 @@ def run_attendance(
             result = checker.run(site_info, context)
             results.append(result)
 
+        if headed:
+            # 사용자가 화면의 최종 결과를 충분히 확인할 수 있도록 3초 대기
+            import time
+            time.sleep(3)
+
         browser.close()
 
     print_summary_table(results)
@@ -140,9 +168,21 @@ def main():
         help="특정 사이트만 실행 (예: --site 칠성몰, --site chilsung)"
     )
     parser.add_argument(
-        "--headed",
+        "--headless",
         action="store_true",
-        help="브라우저 창을 화면에 띄워 실행 (기본값: 헤드리스 백그라운드 모드)"
+        help="브라우저 창을 띄우지 않고 백그라운드에서 조용히 실행 (기본값: 브라우저 화면 표시)"
+    )
+    parser.add_argument(
+        "--slow-mo",
+        type=int,
+        default=0,
+        help="동작 간 속도 지연(ms 단위, 기본값: 화면 표시 모드 시 600ms)"
+    )
+    parser.add_argument(
+        "--channel",
+        type=str,
+        default="chrome",
+        help="브라우저 채널 (chrome, msedge, chromium 등, 기본값: chrome)"
     )
     parser.add_argument(
         "--info-file", "-f",
@@ -166,9 +206,14 @@ def main():
         print()
         return
 
+    # 기본값: 브라우저 화면 표시 (args.headless 가 주어질 때만 백그라운드로 전환)
+    is_headed = not args.headless
+
     exit_code = run_attendance(
         target_site=args.site,
-        headed=args.headed,
+        headed=is_headed,
+        slow_mo=args.slow_mo,
+        channel=args.channel,
         info_file_path=Path(args.info_file)
     )
     sys.exit(exit_code)
