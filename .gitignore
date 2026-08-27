@@ -158,6 +158,10 @@ macro/client_secrets.json
 macro/*.pickle
 macro/*.session
 macro/*_session.json
+site_info.json
+macro/**/site_info.json
+macro/attendance-check/screenshots/
+macro/attendance-check/sessions/
 
 # Macro Upload Directory (Keep folder structure via .gitkeep)
 macro/upload/*

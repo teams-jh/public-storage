@@ -29,6 +29,10 @@ client_secrets.json
 *.pickle
 *.session
 *_session.json
+site_info.json
+attendance-check/site_info.json
+attendance-check/screenshots/
+attendance-check/sessions/
 
 # ==========================================
 # Browser Sessions & Playwright User Data

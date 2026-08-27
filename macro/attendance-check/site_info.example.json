@@ -1,0 +1,11 @@
+[
+  {
+    "name": "칠성몰",
+    "site_key": "chilsung",
+    "url": "https://mall.lottechilsung.co.kr/daily-check",
+    "login_url": "https://mall.lottechilsung.co.kr/sign-in",
+    "id": "YOUR_ID",
+    "password": "YOUR_PASSWORD",
+    "enabled": true
+  }
+]
