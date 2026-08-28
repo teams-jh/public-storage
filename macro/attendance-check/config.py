@@ -30,6 +30,12 @@ DEFAULT_USER_AGENT = (
 )
 DEFAULT_VIEWPORT = {"width": 1280, "height": 900}
 
+# ==========================================
+# Retry Policy Constants
+# ==========================================
+MAX_RETRY_ROUNDS = 1  # 전체 사이트 순회 후 실패한 사이트에 대해 재시도할 횟수 (1회)
+RETRY_DELAY_SEC = 2   # 재시도 라운드 시작 전 대기 시간 (초)
+
 
 def setup_logger(name: str = "attendance_checker", level: int = logging.INFO) -> logging.Logger:
     """

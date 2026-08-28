@@ -7,6 +7,8 @@ from sites.ondisk import OndiskAttendanceChecker
 from sites.filejo import FilejoAttendanceChecker
 from sites.filecity import FilecityAttendanceChecker
 from sites.sharebox import ShareboxAttendanceChecker
+from sites.heypoll import HeypollAttendanceChecker
+from sites.itemmania import ItemmaniaAttendanceChecker
 
 # 사이트 식별자(site_key 및 사이트 이름) 매핑 레지스트리
 SITE_REGISTRY: Dict[str, Type[BaseAttendanceChecker]] = {
@@ -34,6 +36,14 @@ SITE_REGISTRY: Dict[str, Type[BaseAttendanceChecker]] = {
     "sharebox": ShareboxAttendanceChecker,
     "share-box": ShareboxAttendanceChecker,
     "쉐어박스": ShareboxAttendanceChecker,
+    # 헤이폴 (HeyPoll)
+    "heypoll": HeypollAttendanceChecker,
+    "hey-poll": HeypollAttendanceChecker,
+    "헤이폴": HeypollAttendanceChecker,
+    # 아이템매니아 (ItemMania)
+    "itemmania": ItemmaniaAttendanceChecker,
+    "item-mania": ItemmaniaAttendanceChecker,
+    "아이템매니아": ItemmaniaAttendanceChecker,
 }
 
 
@@ -56,6 +66,8 @@ __all__ = [
     "FilejoAttendanceChecker",
     "FilecityAttendanceChecker",
     "ShareboxAttendanceChecker",
+    "HeypollAttendanceChecker",
+    "ItemmaniaAttendanceChecker",
     "get_checker",
     "SITE_REGISTRY",
 ]

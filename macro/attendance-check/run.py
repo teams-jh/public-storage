@@ -8,6 +8,8 @@ from config import (
     SITE_INFO_PATH,
     DEFAULT_USER_AGENT,
     DEFAULT_VIEWPORT,
+    MAX_RETRY_ROUNDS,
+    RETRY_DELAY_SEC,
     load_site_info,
     setup_logger,
 )
@@ -30,13 +32,14 @@ def print_summary_table(results: List[Dict[str, Any]]):
     실행 결과를 터미널에 요약 표로 출력합니다.
     """
     print("\n" + "=" * 70)
-    print(f"{'사이트':<15} | {'상태':<12} | {'결과 메시지'}")
+    print(f"{'사이트':<15} | {'상태':<12} | {'재시도':<6} | {'결과 메시지'}")
     print("-" * 70)
 
     for res in results:
         name = res.get("site_name", "미상")
         status = res.get("status", "UNKNOWN")
         msg = res.get("message", "")
+        retried = res.get("retried", False)
 
         status_display = {
             "SUCCESS": "[성공]",
@@ -47,7 +50,8 @@ def print_summary_table(results: List[Dict[str, Any]]):
             "ERROR": "[오류]",
         }.get(status, f"[{status}]")
 
-        print(f"{name:<15} | {status_display:<12} | {msg}")
+        retried_str = "O" if retried else "-"
+        print(f"{name:<15} | {status_display:<12} | {retried_str:<6} | {msg}")
 
     print("=" * 70 + "\n")
 
@@ -102,7 +106,8 @@ def run_attendance(
         f"(브라우저 창 표시: {'화면 표시 모드(기본)' if headed else '헤드리스(백그라운드)'}, 채널: {channel or 'chromium'}, 속도지연: {effective_slow_mo}ms)"
     )
 
-    results: List[Dict[str, Any]] = []
+    results_map: Dict[str, Dict[str, Any]] = {}
+    ordered_keys: List[str] = []
 
     with sync_playwright() as p:
         # 브라우저 실행 (Chrome 채널 우선, 실패 시 기본 Chromium 사용)
@@ -128,22 +133,62 @@ def run_attendance(
             viewport=DEFAULT_VIEWPORT,
         )
 
+        # ----------------------------------------------------
+        # 1차 전체 출석체크 라운드
+        # ----------------------------------------------------
         for site_info in run_list:
             site_name = site_info.get("name", "")
             site_key = site_info.get("site_key", "")
+            dict_key = site_key or site_name
+
+            if dict_key not in ordered_keys:
+                ordered_keys.append(dict_key)
 
             checker = get_checker(site_key) or get_checker(site_name)
             if not checker:
                 logger.error(f"'{site_name or site_key}' 사이트를 지원하는 출석체크 핸들러가 구현되지 않았습니다.")
-                results.append({
+                results_map[dict_key] = {
                     "site_name": site_name or site_key,
                     "status": "ERROR",
                     "message": "지원하지 않는 사이트 핸들러 (sites 디렉토리에 추가 필요)",
-                })
+                    "retried": False,
+                }
                 continue
 
             result = checker.run(site_info, context)
-            results.append(result)
+            result["retried"] = False
+            results_map[dict_key] = result
+
+        # ----------------------------------------------------
+        # 2차 실패 사이트 재시도 라운드 (1회 재시도)
+        # ----------------------------------------------------
+        failed_sites = [
+            site_info for site_info in run_list
+            if results_map.get(site_info.get("site_key") or site_info.get("name", "")).get("status") not in ["SUCCESS", "ALREADY_CHECKED"]
+        ]
+
+        if failed_sites and MAX_RETRY_ROUNDS > 0:
+            import time
+            time.sleep(RETRY_DELAY_SEC)
+
+            failed_names = [s.get("name") or s.get("site_key") for s in failed_sites]
+            logger.info("\n" + "=" * 70)
+            logger.info(f"🔄 총 {len(failed_sites)}개 실패 사이트에 대해 재시도를 진행합니다: {failed_names}")
+            logger.info("=" * 70 + "\n")
+
+            for site_info in failed_sites:
+                site_name = site_info.get("name", "")
+                site_key = site_info.get("site_key", "")
+                dict_key = site_key or site_name
+
+                checker = get_checker(site_key) or get_checker(site_name)
+                if not checker:
+                    continue
+
+                logger.info(f"[{site_name or site_key}] 재시도 실행 중...")
+                retry_result = checker.run(site_info, context)
+                retry_result["retried"] = True
+                results_map[dict_key] = retry_result
 
         if headed:
             # 사용자가 화면의 최종 결과를 충분히 확인할 수 있도록 3초 대기
@@ -152,10 +197,11 @@ def run_attendance(
 
         browser.close()
 
-    print_summary_table(results)
+    final_results = [results_map[k] for k in ordered_keys]
+    print_summary_table(final_results)
 
     # 실패 건수가 있으면 1 반환, 전부 정상이면 0
-    has_failure = any(r.get("status") in ["LOGIN_FAILED", "ERROR", "CHECK_FAILED"] for r in results)
+    has_failure = any(r.get("status") not in ["SUCCESS", "ALREADY_CHECKED"] for r in final_results)
     return 1 if has_failure else 0
 
 
