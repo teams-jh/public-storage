@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 import logging
 from playwright.sync_api import BrowserContext, Dialog, Page
 
-from config import SCREENSHOTS_DIR, setup_logger
+from config import SCREENSHOTS_DIR, SCREENSHOTS_SUCCESS_DIR, SCREENSHOTS_FAIL_DIR, setup_logger
 
 
 class BaseAttendanceChecker(ABC):
@@ -37,16 +37,34 @@ class BaseAttendanceChecker(ABC):
 
         page.on("dialog", on_dialog)
 
-    def save_screenshot(self, page: Page, prefix: str = "status") -> Optional[Path]:
+    def save_screenshot(
+        self,
+        page: Page,
+        prefix: str = "status",
+        is_success: bool = False,
+        scroll_y: int = 300,
+        full_page: bool = True
+    ) -> Optional[Path]:
         """
-        현재 페이지 화면을 캡처하여 저장합니다.
+        현재 페이지 화면을 스크롤한 뒤 전체 화면(full_page)으로 캡처하여 성공(success) 또는 실패(fail) 하위 폴더에 저장합니다.
         """
         try:
+            target_dir = SCREENSHOTS_SUCCESS_DIR if is_success else SCREENSHOTS_FAIL_DIR
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            # 출석 영역/결과 화면이 잘 담기도록 스크롤을 아래로 이동
+            try:
+                if scroll_y > 0:
+                    page.evaluate(f"window.scrollBy(0, {scroll_y})")
+                    page.wait_for_timeout(500)
+            except Exception:
+                pass
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{self.site_key}_{prefix}_{timestamp}.png"
-            filepath = SCREENSHOTS_DIR / filename
-            page.screenshot(path=str(filepath), full_page=False)
-            self.logger.debug(f"스크린샷 저장 완료: {filepath}")
+            filepath = target_dir / filename
+            page.screenshot(path=str(filepath), full_page=full_page)
+            self.logger.debug(f"스크린샷 저장 완료 ({'success' if is_success else 'fail'}): {filepath}")
             return filepath
         except Exception as e:
             self.logger.warning(f"스크린샷 저장 실패: {e}")
@@ -58,7 +76,7 @@ class BaseAttendanceChecker(ABC):
         1. 페이지 생성 및 리스너 등록
         2. 로그인 수행
         3. 출석체크 수행
-        4. 결과 리포트 반환
+        4. 결과 리포트 반환 및 성공/실패 스크린샷 캡처
         """
         site_name = site_info.get("name", self.display_name)
         self.logger.info(f"========== [{site_name}] 출석체크 시작 ==========")
@@ -83,7 +101,7 @@ class BaseAttendanceChecker(ABC):
                 self.logger.error(f"[{site_name}] 로그인 실패: {login_msg}")
                 result["status"] = "LOGIN_FAILED"
                 result["message"] = f"로그인 실패: {login_msg}"
-                result["screenshot"] = str(self.save_screenshot(page, "login_failed") or "")
+                result["screenshot"] = str(self.save_screenshot(page, "login_failed", is_success=False) or "")
                 result["dialogs"] = self.captured_dialogs.copy()
                 return result
 
@@ -96,17 +114,19 @@ class BaseAttendanceChecker(ABC):
 
             if result["success"]:
                 self.logger.info(f"[{site_name}] 출석체크 성공: {result['message']}")
+                result["screenshot"] = str(self.save_screenshot(page, "success", is_success=True) or "")
             elif result["status"] == "ALREADY_CHECKED":
                 self.logger.info(f"[{site_name}] 이미 출석 완료됨: {result['message']}")
+                result["screenshot"] = str(self.save_screenshot(page, "already_checked", is_success=True) or "")
             else:
                 self.logger.warning(f"[{site_name}] 출석체크 미완료/실패: {result['message']}")
-                result["screenshot"] = str(self.save_screenshot(page, "check_failed") or "")
+                result["screenshot"] = str(self.save_screenshot(page, "check_failed", is_success=False) or "")
 
         except Exception as e:
             self.logger.exception(f"[{site_name}] 예외 발생: {e}")
             result["status"] = "ERROR"
             result["message"] = f"오류 발생: {str(e)}"
-            result["screenshot"] = str(self.save_screenshot(page, "error") or "")
+            result["screenshot"] = str(self.save_screenshot(page, "error", is_success=False) or "")
             result["dialogs"] = self.captured_dialogs.copy()
         finally:
             try:

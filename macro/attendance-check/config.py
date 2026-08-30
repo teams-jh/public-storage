@@ -12,10 +12,14 @@ ROOT_DIR = BASE_DIR.parent.parent
 SITE_INFO_PATH = BASE_DIR / "site_info.json"
 SITE_INFO_EXAMPLE_PATH = BASE_DIR / "site_info.example.json"
 SCREENSHOTS_DIR = BASE_DIR / "screenshots"
+SCREENSHOTS_SUCCESS_DIR = SCREENSHOTS_DIR / "success"
+SCREENSHOTS_FAIL_DIR = SCREENSHOTS_DIR / "fail"
 SESSIONS_DIR = BASE_DIR / "sessions"
 
 # Create required directories
 SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+SCREENSHOTS_SUCCESS_DIR.mkdir(parents=True, exist_ok=True)
+SCREENSHOTS_FAIL_DIR.mkdir(parents=True, exist_ok=True)
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ==========================================

@@ -12,11 +12,13 @@ macro/attendance-check/
 ├── site_info.example.json      # 설정 파일 템플릿
 ├── config.py                   # 경로, 타임아웃, 로깅 등 공통 설정
 ├── run.py                      # 매크로 실행 메인 엔트리포인트 (CLI)
-├── screenshots/                # 실패/오류 시 자동 저장되는 화면 캡처 디렉토리
+├── screenshots/                # 화면 캡처 디렉토리
+│   ├── success/                # 출석체크 성공/이미완료 스크린샷
+│   └── fail/                   # 로그인 실패, 출석 실패, 오류 스크린샷
 └── sites/
     ├── __init__.py             # 사이트 핸들러 매핑 레지스트리
     ├── base.py                 # BaseAttendanceChecker 기본 추상 클래스
-    └── chilsung.py             # 칠성몰(롯데칠성음료) 전용 핸들러
+    └── ...                     # 사이트별 전용 핸들러들
 ```
 
 ---
