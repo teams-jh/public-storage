@@ -1,14 +1,5 @@
 [
   {
-    "id": "al-is-well",
-    "title": "오픽 AL is Well",
-    "subtitle": "나만의 스크립트를 만들고 싶다면?",
-    "logoImage": "/personal-ad/al-is-well.png",
-    "linkUrl": "al-is-well",
-    "buttonText": "연습하기",
-    "theme": "indigo"
-  },
-  {
     "id": "toeic-bank",
     "title": "토익 RC PART 5 문제 은행",
     "subtitle": "토익 점수가 필요하다면?",
@@ -16,5 +7,23 @@
     "linkUrl": "toeic-bank",
     "buttonText": "풀어보기",
     "theme": "blue"
+  },
+  {
+    "id": "real-estate-bank",
+    "title": "공인중개사 기출 은행",
+    "subtitle": "모바일로 공인중개사 공부하고 싶다면?",
+    "logoImage": "/personal-ad/real-estate-bank.png",
+    "linkUrl": "real-estate-bank",
+    "buttonText": "풀어보기",
+    "theme": "purple"
+  },
+  {
+    "id": "al-is-well",
+    "title": "오픽 AL is Well",
+    "subtitle": "나만의 스크립트를 만들고 싶다면?",
+    "logoImage": "/personal-ad/al-is-well.png",
+    "linkUrl": "al-is-well",
+    "buttonText": "연습하기",
+    "theme": "indigo"
   }
 ]
