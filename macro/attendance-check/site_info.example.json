@@ -7,50 +7,5 @@
     "id": "YOUR_CHILSUNG_ID",
     "password": "YOUR_CHILSUNG_PASSWORD",
     "enabled": true
-  },
-  {
-    "name": "KDISK",
-    "site_key": "kdisk",
-    "url": "https://www.kdisk.co.kr/main/eventMarge.php?mode=eventMarge&sm=event&action=view&idx=171",
-    "login_url": "https://www.kdisk.co.kr/index.php",
-    "id": "YOUR_KDISK_ID",
-    "password": "YOUR_KDISK_PASSWORD",
-    "enabled": true
-  },
-  {
-    "name": "온디스크",
-    "site_key": "ondisk",
-    "url": "https://ondisk.co.kr/main/eventMarge.php?mode=eventMarge&sm=event&action=view&idx=171",
-    "login_url": "https://ondisk.co.kr/index.php",
-    "id": "YOUR_ONDISK_ID",
-    "password": "YOUR_ONDISK_PASSWORD",
-    "enabled": true
-  },
-  {
-    "name": "파일조",
-    "site_key": "filejo",
-    "url": "https://extra.filejo.com/main/event.php?doc=check",
-    "login_url": "https://extra.filejo.com/",
-    "id": "YOUR_FILEJO_ID",
-    "password": "YOUR_FILEJO_PASSWORD",
-    "enabled": true
-  },
-  {
-    "name": "파일시티",
-    "site_key": "filecity",
-    "url": "https://www.filecity.co.kr/event/#tab=chulgeun^2025",
-    "login_url": "https://www.filecity.co.kr/",
-    "id": "YOUR_FILECITY_ID",
-    "password": "YOUR_FILECITY_PASSWORD",
-    "enabled": true
-  },
-  {
-    "name": "쉐어박스",
-    "site_key": "sharebox",
-    "url": "https://sharebox.co.kr/event/?todo=view&idx=351&p=1",
-    "login_url": "https://sharebox.co.kr/",
-    "id": "YOUR_SHAREBOX_ID",
-    "password": "YOUR_SHAREBOX_PASSWORD",
-    "enabled": true
   }
 ]
