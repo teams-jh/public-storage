@@ -12,8 +12,8 @@ class KdiskAttendanceChecker(BaseAttendanceChecker):
     - 출석체크 URL: https://www.kdisk.co.kr/main/eventMarge.php?mode=eventMarge&sm=event&action=view&idx=171
     """
 
-    def __init__(self):
-        super().__init__(site_key="kdisk", display_name="케이디스크")
+    def __init__(self, screenshot_delay_sec: int = 15):
+        super().__init__(site_key="kdisk", display_name="케이디스크", screenshot_delay_sec=screenshot_delay_sec)
 
     def _close_overlay_popups(self, page: Page):
         """

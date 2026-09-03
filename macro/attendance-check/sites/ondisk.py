@@ -13,8 +13,8 @@ class OndiskAttendanceChecker(BaseAttendanceChecker):
     - 출석체크 URL: https://ondisk.co.kr/index.php?mode=eventMarge&sm=event&action=view&idx=746&event_page=1
     """
 
-    def __init__(self):
-        super().__init__(site_key="ondisk", display_name="온디스크")
+    def __init__(self, screenshot_delay_sec: int = 15):
+        super().__init__(site_key="ondisk", display_name="온디스크", screenshot_delay_sec=screenshot_delay_sec)
 
     def _close_overlay_popups(self, page: Page):
         """

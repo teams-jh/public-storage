@@ -14,9 +14,10 @@ class BaseAttendanceChecker(ABC):
     각 사이트별 로그인 방식 및 출석체크 UI 동작을 구현합니다.
     """
 
-    def __init__(self, site_key: str, display_name: str):
+    def __init__(self, site_key: str, display_name: str, screenshot_delay_sec: int = 0):
         self.site_key = site_key
         self.display_name = display_name
+        self.screenshot_delay_sec = screenshot_delay_sec
         self.logger = setup_logger(f"Checker.{site_key}")
         self.captured_dialogs: List[str] = []
 
@@ -43,12 +44,18 @@ class BaseAttendanceChecker(ABC):
         prefix: str = "status",
         is_success: bool = False,
         scroll_y: int = 300,
-        full_page: bool = True
+        full_page: bool = True,
+        delay_sec: Optional[int] = None
     ) -> Optional[Path]:
         """
         현재 페이지 화면을 스크롤한 뒤 전체 화면(full_page)으로 캡처하여 성공(success) 또는 실패(fail) 하위 폴더에 저장합니다.
         """
         try:
+            wait_sec = delay_sec if delay_sec is not None else self.screenshot_delay_sec
+            if wait_sec > 0:
+                self.logger.info(f"[{self.display_name}] 스크린샷 촬영 전 {wait_sec}초 대기 중...")
+                page.wait_for_timeout(wait_sec * 1000)
+
             target_dir = SCREENSHOTS_SUCCESS_DIR if is_success else SCREENSHOTS_FAIL_DIR
             target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -79,6 +86,12 @@ class BaseAttendanceChecker(ABC):
         4. 결과 리포트 반환 및 성공/실패 스크린샷 캡처
         """
         site_name = site_info.get("name", self.display_name)
+        if "screenshot_delay_sec" in site_info:
+            try:
+                self.screenshot_delay_sec = int(site_info["screenshot_delay_sec"])
+            except (ValueError, TypeError):
+                pass
+
         self.logger.info(f"========== [{site_name}] 출석체크 시작 ==========")
         page = context.new_page()
         self._setup_dialog_listener(page)
@@ -101,7 +114,7 @@ class BaseAttendanceChecker(ABC):
                 self.logger.error(f"[{site_name}] 로그인 실패: {login_msg}")
                 result["status"] = "LOGIN_FAILED"
                 result["message"] = f"로그인 실패: {login_msg}"
-                result["screenshot"] = str(self.save_screenshot(page, "login_failed", is_success=False) or "")
+                result["screenshot"] = str(self.save_screenshot(page, "login_failed", is_success=False, delay_sec=0) or "")
                 result["dialogs"] = self.captured_dialogs.copy()
                 return result
 
