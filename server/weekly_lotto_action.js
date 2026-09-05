@@ -34,9 +34,46 @@ async function getSHA(octokit, path) {
   }
 }
 
-const githubWrite = async (path, contents, commitMessage) => {
+async function getRemoteOrLocalJson(octokit, repoPath, localPath) {
+  let remoteData = null;
+  let sha = undefined;
+
+  if (octokit && token) {
+    try {
+      const response = await octokit.request(
+        `GET /repos/${owner}/${repo}/contents/${repoPath}`
+      );
+      if (response.data && response.data.content) {
+        const decoded = Buffer.from(response.data.content, "base64").toString("utf-8");
+        remoteData = JSON.parse(decoded);
+        sha = response.data.sha;
+        console.log(`Successfully fetched ${repoPath} from GitHub (SHA: ${sha})`);
+      }
+    } catch (error) {
+      console.warn(`Could not fetch ${repoPath} from GitHub, falling back to local file:`, error.message);
+    }
+  }
+
+  if (Array.isArray(remoteData) && remoteData.length > 0) {
+    return { data: remoteData, sha };
+  }
+
+  if (fs.existsSync(localPath)) {
+    try {
+      const fileContent = fs.readFileSync(localPath, "utf-8");
+      return { data: JSON.parse(fileContent), sha };
+    } catch (e) {
+      console.error(`Error reading local ${localPath}:`, e.message);
+    }
+  }
+
+  return { data: [], sha };
+}
+
+const githubWrite = async (path, contents, commitMessage, existingSha) => {
   if (!token) {
     console.error("GitHub token is not defined. Please check GH_TOKEN or GITHUB_TOKEN environment variable.");
+    return undefined;
   }
 
   const octokit = new Octokit({
@@ -46,7 +83,7 @@ const githubWrite = async (path, contents, commitMessage) => {
     },
   });
 
-  const fileSHA = await getSHA(octokit, path);
+  const fileSHA = existingSha || (await getSHA(octokit, path));
 
   const payload = {
     message: commitMessage,
@@ -141,25 +178,29 @@ function transformLottoItem(item) {
 const updateLottoJson = async (targetDateStr) => {
   const filePath = path.join(__dirname, "../json/lottoNumber.json");
   const compactFilePath = path.join(__dirname, "../json/compactLottoNumber.json");
+  const githubFilePath = "json/lottoNumber.json";
+  const githubCompactFilePath = "json/compactLottoNumber.json";
 
   console.log("filePath :", filePath);
 
+  let octokit = null;
+  if (token) {
+    octokit = new Octokit({
+      auth: token,
+      request: {
+        fetch: fetch,
+      },
+    });
+  }
+
   try {
-    const data = fs.readFileSync(filePath, "utf-8");
-    const lottoJson = JSON.parse(data);
+    // 1. GitHub 원격 저장소 최신 파일 우선 조회 (로컬 파일 불일치로 인한 덮어쓰기 방지)
+    const { data: lottoJson, sha: lottoSha } = await getRemoteOrLocalJson(octokit, githubFilePath, filePath);
+    let { data: compactLottoJson, sha: compactSha } = await getRemoteOrLocalJson(octokit, githubCompactFilePath, compactFilePath);
+
     const lastEntry = lottoJson[lottoJson.length - 1];
     const lastDrwNo = lastEntry ? lastEntry.drwNo : 0;
     let isNewRoundAdded = false;
-
-    // compactLottoNumber.json 기존 파일 읽기 (사용자가 삭제한 과거 내역 유지)
-    let compactLottoJson = [];
-    if (fs.existsSync(compactFilePath)) {
-      try {
-        compactLottoJson = JSON.parse(fs.readFileSync(compactFilePath, "utf-8"));
-      } catch (e) {
-        compactLottoJson = [];
-      }
-    }
 
     if (!Array.isArray(compactLottoJson) || compactLottoJson.length === 0) {
       compactLottoJson = lottoJson.map(transformLottoItem);
@@ -181,30 +222,31 @@ const updateLottoJson = async (targetDateStr) => {
         if (parsedData && parsedData.returnValue === 'success' && parsedData.drwtNo1 !== 0) {
              const compactItem = transformLottoItem(parsedData);
 
-             if (parsedData.drwNo > lastDrwNo) {
-                 console.log(`New round ${parsedData.drwNo} found from HTML Parser. Appending.`);
-                 lottoJson.push(parsedData);
-                 isNewRoundAdded = true;
-
-                 // compactLottoJson에도 신규 날짜 항목만 추가
-                 const existingIndex = compactLottoJson.findIndex(item => item.drwNoDate === compactItem.drwNoDate);
-                 if (existingIndex !== -1) {
-                     compactLottoJson[existingIndex] = compactItem;
-                 } else {
-                     compactLottoJson.push(compactItem);
-                 }
+             // 1. lottoJson 처리: 기존 회차면 정보 업데이트, 새 회차면 append
+             const existingLottoIndex = lottoJson.findIndex(item => item.drwNo === parsedData.drwNo);
+             if (existingLottoIndex !== -1) {
+                 lottoJson[existingLottoIndex] = parsedData;
+                 console.log(`Updated round ${parsedData.drwNo} in lottoJson`);
              } else {
-                 const existingIndex = lottoJson.findIndex(item => item.drwNo === parsedData.drwNo);
-                 if (existingIndex !== -1) {
-                    lottoJson[existingIndex] = parsedData;
-                    console.log(`Updated round ${parsedData.drwNo} from HTML Parser`);
-
-                    const compactIndex = compactLottoJson.findIndex(item => item.drwNoDate === compactItem.drwNoDate);
-                    if (compactIndex !== -1) {
-                      compactLottoJson[compactIndex] = compactItem;
-                    }
-                 }
+                 console.log(`New round ${parsedData.drwNo} found. Appending to lottoJson.`);
+                 lottoJson.push(parsedData);
+                 lottoJson.sort((a, b) => a.drwNo - b.drwNo);
+                 isNewRoundAdded = true;
              }
+
+             // 2. compactLottoJson 처리: 날짜(drwNoDate) 기준 중복 체크
+             // 동일 날짜가 이미 있으면 업데이트, 없는 날짜면 항상 끝에 추가(push)
+             const existingCompactIndex = compactLottoJson.findIndex(item => item.drwNoDate === compactItem.drwNoDate);
+             if (existingCompactIndex !== -1) {
+                 compactLottoJson[existingCompactIndex] = compactItem;
+                 console.log(`Updated date ${compactItem.drwNoDate} in compactLottoJson`);
+             } else {
+                 console.log(`New date ${compactItem.drwNoDate} found. Appending to compactLottoJson.`);
+                 compactLottoJson.push(compactItem);
+             }
+
+             // 날짜 기준 오름차순 정렬 보장
+             compactLottoJson.sort((a, b) => new Date(a.drwNoDate) - new Date(b.drwNoDate));
         }
     }
 
@@ -218,14 +260,11 @@ const updateLottoJson = async (targetDateStr) => {
     const today = new Date();
     const formatted = today.toISOString().split("T")[0];
 
-    const githubFilePath = "json/lottoNumber.json";
-    const githubCompactFilePath = "json/compactLottoNumber.json";
-
     console.log("githubFilePath :", githubFilePath);
-    const status = await githubWrite(githubFilePath, updatedJson, `${formatted} Update lottoNumber.json`); 
+    const status = await githubWrite(githubFilePath, updatedJson, `${formatted} Update lottoNumber.json`, lottoSha); 
     
     console.log("githubCompactFilePath :", githubCompactFilePath);
-    const compactStatus = await githubWrite(githubCompactFilePath, updatedCompactJson, `${formatted} Update compactLottoNumber.json`);
+    const compactStatus = await githubWrite(githubCompactFilePath, updatedCompactJson, `${formatted} Update compactLottoNumber.json`, compactSha);
 
     if (((status === 200 || status === 201) || (compactStatus === 200 || compactStatus === 201)) && isNewRoundAdded) {
         if (process.env.GITHUB_OUTPUT) {
