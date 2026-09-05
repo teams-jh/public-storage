@@ -12,8 +12,8 @@ class FilecityAttendanceChecker(BaseAttendanceChecker):
     - 이벤트 URL: https://www.filecity.co.kr/event/attend_re.html
     """
 
-    def __init__(self):
-        super().__init__(site_key="filecity", display_name="파일시티")
+    def __init__(self, screenshot_delay_sec: int = 15):
+        super().__init__(site_key="filecity", display_name="파일시티", screenshot_delay_sec=screenshot_delay_sec)
 
     def _close_overlay_popups(self, page: Page):
         """
