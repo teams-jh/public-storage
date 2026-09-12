@@ -332,39 +332,17 @@ class ThreadsUploader(BaseUploader):
         direction = 1 if month_steps >= 0 else -1
         displayed_month_index = displayed_year * 12 + displayed_month_number - 1
         for step in range(abs(month_steps)):
-            month_buttons = page.locator(
-                f"button[aria-label='{month_button_label}'], "
-                f"button[aria-label='{english_button_label}']"
-            )
-            month_button = self._last_visible(month_buttons)
-            if month_button is None:
-                self.logger.error(f"Threads [{month_button_label}] 버튼을 찾지 못했어요.")
-                return False
-            month_button.scroll_into_view_if_needed()
-            month_button_box = month_button.bounding_box()
-            if month_button_box is None:
-                self.logger.error(f"Threads [{month_button_label}] 버튼 위치를 읽지 못했어요.")
-                return False
-            page.mouse.click(
-                month_button_box["x"] + month_button_box["width"] / 2,
-                month_button_box["y"] + month_button_box["height"] / 2,
-            )
             expected_month_index = displayed_month_index + direction * (step + 1)
             expected_year, zero_based_month = divmod(expected_month_index, 12)
             expected_month = zero_based_month + 1
-            try:
-                page.wait_for_function(
-                    r"""(target) => Array.from(document.querySelectorAll('h2, span'))
-                        .some(element => {
-                            const rect = element.getBoundingClientRect();
-                            const text = (element.textContent || '').replace(/\s+/g, ' ').trim();
-                            return rect.width > 0 && rect.height > 0 &&
-                                text === `${target.year}년 ${target.month}월`;
-                        })""",
-                    arg={"year": expected_year, "month": expected_month},
-                    timeout=3000,
-                )
-            except Exception:
+            month_changed = self._click_threads_month_button(
+                page,
+                month_button_label,
+                english_button_label,
+                expected_year,
+                expected_month,
+            )
+            if not month_changed:
                 self.logger.error(
                     f"Threads 달력이 {expected_year}년 {expected_month}월로 바뀌지 않았어요."
                 )
@@ -408,6 +386,52 @@ class ThreadsUploader(BaseUploader):
                 continue
 
         self.logger.error(f"Threads 예약 날짜 셀을 찾지 못했어요: {scheduled_at:%Y-%m-%d}")
+        return False
+
+    def _click_threads_month_button(
+        self,
+        page,
+        korean_label: str,
+        english_label: str,
+        expected_year: int,
+        expected_month: int,
+    ) -> bool:
+        """aria-label이 지정된 달력 월 이동 버튼을 누르고 제목 변경을 확인해요."""
+        for label in (korean_label, english_label):
+            month_buttons = page.get_by_role("button", name=label, exact=True)
+            month_button = self._last_visible(month_buttons)
+            if month_button is None:
+                continue
+
+            for click_method in ("playwright", "javascript", "keyboard"):
+                try:
+                    month_button = self._last_visible(
+                        page.get_by_role("button", name=label, exact=True)
+                    )
+                    if month_button is None:
+                        break
+                    month_button.scroll_into_view_if_needed()
+                    if click_method == "playwright":
+                        month_button.click(timeout=3000)
+                    elif click_method == "javascript":
+                        month_button.evaluate("element => element.click()")
+                    else:
+                        month_button.focus()
+                        month_button.press("Enter")
+
+                    for _ in range(6):
+                        page.wait_for_timeout(250)
+                        if self._get_threads_calendar_month(page) == (
+                            expected_year,
+                            expected_month,
+                        ):
+                            self.logger.info(
+                                f"Threads 달력 월 이동 완료: "
+                                f"{expected_year:04d}-{expected_month:02d}"
+                            )
+                            return True
+                except Exception:
+                    continue
         return False
 
     @staticmethod
