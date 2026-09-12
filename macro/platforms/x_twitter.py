@@ -2,6 +2,7 @@ import os
 import time
 from pathlib import Path
 from platforms.base import BaseUploader
+from platforms.scheduling import get_scheduled_at
 from config import (
     CONFIG, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
     get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
@@ -15,6 +16,55 @@ class TwitterXUploader(BaseUploader):
         self.access_token = CONFIG.get("TWITTER_ACCESS_TOKEN")
         self.access_token_secret = CONFIG.get("TWITTER_ACCESS_TOKEN_SECRET")
 
+    def _configure_native_schedule(self, page, scheduled_at) -> bool:
+        """X 작성 창의 캘린더에서 예약 날짜와 시간을 설정합니다."""
+        schedule_button = page.locator(
+            "button[data-testid='scheduleOption'], div[data-testid='scheduleOption'], "
+            "button[aria-label*='예약'], button[aria-label*='Schedule'], "
+            "div[role='button'][aria-label*='예약'], div[role='button'][aria-label*='Schedule']"
+        )
+        if schedule_button.count() == 0:
+            self.logger.error("X 예약 캘린더 버튼을 찾지 못했어요. 즉시 게시하지 않고 중단해요.")
+            return False
+
+        schedule_button.first.click(force=True)
+        page.wait_for_timeout(700)
+        dialog = page.locator("div[role='dialog']").last
+
+        selects = dialog.locator("select")
+        inputs = dialog.locator("input")
+        try:
+            # X 예약 창 순서: 월, 일, 연도, 시, 분, 오전/오후
+            if selects.count() >= 4 and inputs.count() >= 2:
+                selects.nth(0).select_option(index=scheduled_at.month - 1)
+                inputs.nth(0).fill(str(scheduled_at.day))
+                inputs.nth(1).fill(str(scheduled_at.year))
+
+                hour_12 = scheduled_at.hour % 12 or 12
+                selects.nth(1).select_option(label=str(hour_12))
+                selects.nth(2).select_option(label=f"{scheduled_at.minute:02d}")
+                selects.nth(3).select_option(label="AM" if scheduled_at.hour < 12 else "PM")
+            else:
+                self.logger.error("X 예약 날짜·시간 입력 항목을 찾지 못했어요. 즉시 게시하지 않고 중단해요.")
+                return False
+        except Exception as error:
+            self.logger.error(f"X 예약 날짜·시간 입력에 실패했어요: {error}")
+            return False
+
+        confirm = dialog.locator(
+            "button[data-testid='scheduledConfirmationPrimaryAction'], "
+            "div[data-testid='scheduledConfirmationPrimaryAction'], "
+            "button:has-text('확인'), button:has-text('Confirm')"
+        )
+        if confirm.count() == 0:
+            self.logger.error("X 예약 확인 버튼을 찾지 못했어요. 즉시 게시하지 않고 중단해요.")
+            return False
+
+        confirm.first.click(force=True)
+        page.wait_for_timeout(700)
+        self.logger.info(f"X 자체 예약 설정 완료: {scheduled_at:%Y-%m-%d %H:%M}")
+        return True
+
     def upload(self, media_path: Path, metadata: dict) -> bool:
         """
         X(Twitter) 미디어(동영상/사진/GIF) 및 글 업로드
@@ -27,10 +77,13 @@ class TwitterXUploader(BaseUploader):
             caption = caption[:267] + "..."
             
         media_type = get_media_type(media_path)
+        scheduled_at = get_scheduled_at(metadata)
         self.logger.info(f"X(Twitter) 업로드 시작 ({media_type.upper()}): {media_path.name}")
 
         # 방법 1: Tweepy를 통한 API 업로드
-        if all([self.api_key, self.api_secret, self.access_token, self.access_token_secret]):
+        if scheduled_at:
+            self.logger.info("X 자체 예약 기능을 사용하기 위해 Playwright 모드로 진행해요.")
+        elif all([self.api_key, self.api_secret, self.access_token, self.access_token_secret]):
             try:
                 import tweepy
                 self.logger.info("Tweepy API를 통해 미디어 업로드 및 트윗 작성을 진행합니다...")
@@ -80,9 +133,9 @@ class TwitterXUploader(BaseUploader):
                 self.logger.error(f"Tweepy API 업로드 중 오류: {e}. Playwright 모드로 전환합니다.")
 
         # 방법 2: Playwright 웹 브라우저 자동화
-        return self._upload_via_playwright(media_path, caption)
+        return self._upload_via_playwright(media_path, caption, scheduled_at)
 
-    def _upload_via_playwright(self, media_path: Path, caption: str) -> bool:
+    def _upload_via_playwright(self, media_path: Path, caption: str, scheduled_at=None) -> bool:
         try:
             from playwright.sync_api import sync_playwright
             user_data_dir = SESSION_DIR / "browser_x"
@@ -208,6 +261,10 @@ class TwitterXUploader(BaseUploader):
                     except Exception:
                         pass
 
+                if scheduled_at and not self._configure_native_schedule(page, scheduled_at):
+                    browser.close()
+                    return False
+
                 post_btn = page.locator(
                     "div[role='dialog'] button[data-testid='tweetButton'], "
                     "button[data-testid='tweetButton'], "
@@ -230,7 +287,8 @@ class TwitterXUploader(BaseUploader):
                             pass
                         page.wait_for_timeout(1000)
 
-                    self.logger.info("하단 게시하기(Post) 실행 중...")
+                    action_name = "예약" if scheduled_at else "게시하기"
+                    self.logger.info(f"하단 {action_name} 실행 중...")
                     
                     # 1) Playwright 강제 클릭
                     try:
@@ -257,10 +315,11 @@ class TwitterXUploader(BaseUploader):
                         pass
 
                     # 3) X(Twitter) 전송 단축키 (Control+Enter) 입력
-                    try:
-                        page.keyboard.press("Control+Enter")
-                    except Exception:
-                        pass
+                    if not scheduled_at:
+                        try:
+                            page.keyboard.press("Control+Enter")
+                        except Exception:
+                            pass
 
                     self.logger.info(f"게시 요청 전송 완료. 서버 처리 및 완료 대기 중 (최대 {upload_timeout}초)...")
                     
@@ -284,7 +343,8 @@ class TwitterXUploader(BaseUploader):
                     if tweet_sent:
                         self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
                         page.wait_for_timeout(sync_buffer * 1000)
-                        self.logger.info("🎉 X(Twitter) 업로드 최종 성공 완료!")
+                        result_name = "예약 등록" if scheduled_at else "업로드"
+                        self.logger.info(f"🎉 X(Twitter) {result_name} 최종 완료!")
                         browser.close()
                         return True
                     else:
@@ -303,5 +363,4 @@ class TwitterXUploader(BaseUploader):
         except Exception as e:
             self.logger.error(f"Playwright X(Twitter) 업로드 실패: {e}")
             return False
-
 

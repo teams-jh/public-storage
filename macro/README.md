@@ -57,7 +57,7 @@ playwright install chromium
 ## 📝 2. 입력 데이터 설정
 
 ### `input.txt` 작성법
-`macro/input.txt` 파일에 아래와 같이 `[TITLE]`, `[CONTENT]`, `[TAGS]`, `[RATIO]` 형식으로 작성합니다:
+`macro/input.txt` 파일에 아래와 같이 `[TITLE]`, `[CONTENT]`, `[TAGS]`, `[RATIO]`, `[TIME]` 형식으로 작성합니다:
 
 ```txt
 [TITLE]
@@ -72,12 +72,23 @@ playwright install chromium
 
 [RATIO]
 9:16
+
+[TIME]
+2026-09-12 19:30
 ```
 > **💡 비율(RATIO) 설정:**
 > - `9:16`: 인스타그램 릴스/세로 화면 기본 비율 (기본값)
 > - `1:1`: 정사각형 피드 비율
 > - `16:9`: 가로 비율
 > - `원본`: 미디어 원본 비율 유지
+
+> **💡 예약 시간(TIME) 설정:**
+> - `YYYY-MM-DD HH:MM` 형식으로 입력하면 파일을 지금 업로드하고, 각 SNS의 자체 예약 기능에 공개 시각을 등록해요.
+> - 프로그램이 예약 시각까지 실행되거나 기다리지 않아도 돼요.
+> - `[TIME]`을 생략하거나 이미 지난 시각을 입력하면 예약 설정 없이 바로 게시해요.
+> - 예약 UI를 찾지 못하거나 플랫폼의 예약 가능 범위를 벗어나면 즉시 게시하지 않고 해당 플랫폼 업로드를 실패 처리해요.
+> - Instagram은 프로페셔널 계정에서 최대 75일 뒤까지 예약할 수 있어요.
+> - TikTok 웹 예약은 지원 계정의 동영상에 한해 15분~10일 뒤로 설정할 수 있어요.
 
 ### 미디어 파일 배치
 업로드할 파일(`sample.mp4`, `image.jpg`, `animation.gif` 등)을 `macro/upload/` 폴더에 넣어둡니다.
@@ -175,4 +186,3 @@ python auto_upload.py -v upload/my_special_video.mp4
 | **Facebook** | 동영상, 사진, GIF | Graph API / Playwright | 사진(`/photos`), 비디오(`/videos`) API 엔드포인트 분기 및 피드 자동 게시 |
 | **TikTok** | 동영상, 사진 | Playwright (TikTok Studio) | 틱톡 스튜디오를 통한 비디오 및 사진 모드 자동 게시 |
 | **YouTube** | 동영상 전용 | YouTube Data API v3 / Playwright | 쇼츠/동영상 업로드 (사진/GIF 감지 시 자동 스킵 안내) |
-

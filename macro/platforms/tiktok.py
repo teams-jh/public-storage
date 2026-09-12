@@ -1,9 +1,17 @@
 import os
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from platforms.base import BaseUploader
+from platforms.scheduling import (
+    choose_calendar_date,
+    fill_labeled_time,
+    fill_native_date_time,
+    get_scheduled_at,
+)
 from config import (
-    CONFIG, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
+    CONFIG, SESSION_DIR, TIKTOK_SCHEDULE_MAX_DAYS, TIKTOK_SCHEDULE_MIN_MINUTES,
+    get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
     get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
 )
 
@@ -11,6 +19,64 @@ class TikTokUploader(BaseUploader):
     def __init__(self):
         super().__init__("TikTok")
         self.access_token = CONFIG.get("TIKTOK_ACCESS_TOKEN")
+
+    def _configure_native_schedule(self, page, scheduled_at: datetime) -> bool:
+        """TikTok Studio의 자체 예약 게시 기능을 설정합니다."""
+        wait_delta = scheduled_at - datetime.now()
+        if (
+            wait_delta < timedelta(minutes=TIKTOK_SCHEDULE_MIN_MINUTES)
+            or wait_delta > timedelta(days=TIKTOK_SCHEDULE_MAX_DAYS)
+        ):
+            self.logger.error(
+                f"TikTok 예약은 현재 시각에서 {TIKTOK_SCHEDULE_MIN_MINUTES}분~"
+                f"{TIKTOK_SCHEDULE_MAX_DAYS}일 사이만 설정할 수 있어요."
+            )
+            return False
+
+        for surface in [page, *page.frames]:
+            labels = surface.locator(
+                "label:has-text('예약'), label:has-text('Schedule'), "
+                "div:text-is('예약 게시'), div:text-is('예약'), "
+                "div:text-is('Schedule video'), div:text-is('Schedule')"
+            )
+            toggle = None
+            for index in range(labels.count()):
+                label = labels.nth(index)
+                try:
+                    if not label.is_visible():
+                        continue
+                    candidate = label.locator(
+                        "xpath=following::*[@role='switch' or self::input[@type='checkbox']][1]"
+                    )
+                    if candidate.count() > 0:
+                        toggle = candidate.first
+                        break
+                except Exception:
+                    continue
+
+            if toggle is None:
+                continue
+
+            try:
+                checked = toggle.get_attribute("aria-checked")
+                if checked != "true" and not toggle.is_checked():
+                    toggle.click(force=True)
+            except Exception:
+                toggle.click(force=True)
+            surface.wait_for_timeout(700)
+
+            if not fill_native_date_time(surface, scheduled_at):
+                date_set = choose_calendar_date(surface, scheduled_at)
+                time_set = fill_labeled_time(surface, scheduled_at)
+                if not date_set or not time_set:
+                    self.logger.error("TikTok 예약 날짜 또는 시간을 입력하지 못했어요. 즉시 게시하지 않고 중단해요.")
+                    return False
+
+            self.logger.info(f"TikTok 자체 예약 설정 완료: {scheduled_at:%Y-%m-%d %H:%M}")
+            return True
+
+        self.logger.error("TikTok 예약 스위치를 찾지 못했어요. 계정의 예약 기능 지원 여부를 확인해 주세요.")
+        return False
 
     def upload(self, media_path: Path, metadata: dict) -> bool:
         """
@@ -208,6 +274,7 @@ class TikTokUploader(BaseUploader):
                 content = metadata.get("content", "")
                 tags = metadata.get("tags", "")
                 full_caption = metadata.get("full_caption", "")
+                scheduled_at = get_scheduled_at(metadata)
 
                 self.logger.info("제목 및 설명(본문) 입력 시작...")
                 page.wait_for_timeout(1500)
@@ -351,6 +418,10 @@ class TikTokUploader(BaseUploader):
                         pass
                 page.wait_for_timeout(2000)
 
+                if scheduled_at and not self._configure_native_schedule(page, scheduled_at):
+                    browser.close()
+                    return False
+
                 # 게시(Post) 버튼 정확히 찾기
                 post_btn = None
                 selectors = [
@@ -401,7 +472,8 @@ class TikTokUploader(BaseUploader):
                             pass
                         page.wait_for_timeout(1000)
 
-                    self.logger.info("하단 [게시] 버튼 클릭 시도...")
+                    action_name = "예약" if scheduled_at else "게시"
+                    self.logger.info(f"하단 [{action_name}] 버튼 클릭 시도...")
                     post_btn.click(force=True)
                     self.logger.info(f"게시 버튼을 클릭했습니다. 서버 처리 및 완료 대기 중 (최대 {upload_timeout}초)...")
 
@@ -473,12 +545,16 @@ class TikTokUploader(BaseUploader):
                                     "동영상이 업로드되었습니다",
                                     "사진이 게시되었습니다",
                                     "게시되었습니다",
+                                    "예약되었습니다",
+                                    "예약 게시물이 설정되었습니다",
                                     "업로드 완료",
                                     "다른 동영상 업로드",
                                     "게시물 관리",
                                     "Your video has been uploaded",
                                     "Your photo has been uploaded",
                                     "Your post has been published",
+                                    "Your post has been scheduled",
+                                    "Scheduled",
                                     "Manage your posts",
                                     "Upload another video"
                                 ];
@@ -488,7 +564,8 @@ class TikTokUploader(BaseUploader):
                             pass
 
                         if is_done_by_dom and wait_i >= 2:
-                            self.logger.info("🎉 TikTok 게시 완료 및 콘텐츠 관리 화면 감지 완료!")
+                            result_name = "예약 등록" if scheduled_at else "게시"
+                            self.logger.info(f"🎉 TikTok {result_name} 완료 및 콘텐츠 관리 화면 감지 완료!")
                             post_completed = True
                             break
 

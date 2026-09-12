@@ -1,7 +1,14 @@
 import os
 import time
+from datetime import timezone
 from pathlib import Path
 from platforms.base import BaseUploader
+from platforms.scheduling import (
+    choose_calendar_date,
+    fill_labeled_time,
+    fill_native_date_time,
+    get_scheduled_at,
+)
 from config import (
     CONFIG, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
     get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
@@ -40,6 +47,7 @@ class YouTubeUploader(BaseUploader):
         if tags_raw:
             desc_parts.append(tags_raw)
         description = "\n\n".join(desc_parts).strip()
+        scheduled_at = get_scheduled_at(metadata)
 
         self.logger.info(f"YouTube 업로드 시작: {media_path.name}")
         self.logger.info(f"제목: {title}")
@@ -50,14 +58,14 @@ class YouTubeUploader(BaseUploader):
         if secrets_path.exists():
             try:
                 self.logger.info("YouTube Data API v3를 통해 업로드를 시작합니다...")
-                return self._upload_via_api(media_path, title, description, tags)
+                return self._upload_via_api(media_path, title, description, tags, scheduled_at)
             except Exception as e:
                 self.logger.error(f"YouTube API 업로드 중 오류: {e}. Playwright 모드로 전환합니다.")
 
         # 방법 2: Playwright 웹 브라우저 자동화
-        return self._upload_via_playwright(media_path, title, description)
+        return self._upload_via_playwright(media_path, title, description, scheduled_at)
 
-    def _upload_via_api(self, video_path: Path, title: str, description: str, tags: list) -> bool:
+    def _upload_via_api(self, video_path: Path, title: str, description: str, tags: list, scheduled_at=None) -> bool:
         import pickle
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload
@@ -93,10 +101,14 @@ class YouTubeUploader(BaseUploader):
                 "categoryId": "22"  # People & Blogs
             },
             "status": {
-                "privacyStatus": "public",  # 'public', 'private', 'unlisted'
+                "privacyStatus": "private" if scheduled_at else "public",
                 "selfDeclaredMadeForKids": False
             }
         }
+        if scheduled_at:
+            publish_at = scheduled_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            body["status"]["publishAt"] = publish_at
+            self.logger.info(f"YouTube 자체 예약 공개 시각 설정: {scheduled_at:%Y-%m-%d %H:%M}")
 
         media = MediaFileUpload(str(video_path), chunksize=-1, resumable=True)
         request = youtube.videos().insert(
@@ -113,11 +125,12 @@ class YouTubeUploader(BaseUploader):
                 progress = int(status.progress() * 100)
                 self.logger.info(f"업로드 진행률: {progress}%")
 
-        self.logger.info(f"YouTube 업로드 성공 완료! Video ID: {response.get('id')}")
+        result_name = "예약 업로드" if scheduled_at else "업로드"
+        self.logger.info(f"YouTube {result_name} 완료! Video ID: {response.get('id')}")
         self.logger.info(f"URL: https://youtu.be/{response.get('id')}")
         return True
 
-    def _upload_via_playwright(self, video_path: Path, title: str, description: str) -> bool:
+    def _upload_via_playwright(self, video_path: Path, title: str, description: str, scheduled_at=None) -> bool:
         try:
             from playwright.sync_api import sync_playwright
             user_data_dir = SESSION_DIR / "browser_youtube"
@@ -204,17 +217,39 @@ class YouTubeUploader(BaseUploader):
                             next_btn.first.click()
                             page.wait_for_timeout(2000)
 
-                    # 공개(Public) 라디오 버튼 클릭
-                    public_radio = page.locator("tp-yt-paper-radio-button[name='PUBLIC']")
-                    if public_radio.count() > 0:
-                        public_radio.first.click()
-                        page.wait_for_timeout(1000)
+                    if scheduled_at:
+                        schedule_radio = page.locator(
+                            "tp-yt-paper-radio-button[name='SCHEDULE'], #schedule-radio-button, "
+                            "tp-yt-paper-radio-button:has-text('예약'), tp-yt-paper-radio-button:has-text('Schedule')"
+                        )
+                        if schedule_radio.count() == 0:
+                            self.logger.error("YouTube 예약 공개 항목을 찾지 못했어요. 즉시 게시하지 않고 중단해요.")
+                            browser.close()
+                            return False
+                        schedule_radio.first.click(force=True)
+                        page.wait_for_timeout(700)
+
+                        if not fill_native_date_time(page, scheduled_at):
+                            date_set = choose_calendar_date(page, scheduled_at)
+                            time_set = fill_labeled_time(page, scheduled_at)
+                            if not date_set or not time_set:
+                                self.logger.error("YouTube 예약 날짜 또는 시간을 입력하지 못했어요. 즉시 게시하지 않고 중단해요.")
+                                browser.close()
+                                return False
+                        self.logger.info(f"YouTube 자체 예약 공개 설정 완료: {scheduled_at:%Y-%m-%d %H:%M}")
+                    else:
+                        # 공개(Public) 라디오 버튼 클릭
+                        public_radio = page.locator("tp-yt-paper-radio-button[name='PUBLIC']")
+                        if public_radio.count() > 0:
+                            public_radio.first.click()
+                            page.wait_for_timeout(1000)
 
                     # 게시(Done/Save) 버튼 클릭
                     done_btn = page.locator("#done-button")
                     if done_btn.count() > 0:
                         done_btn.first.click()
-                        self.logger.info(f"게시(Done) 버튼 클릭 완료! 서버 최종 게시 및 링크 생성 대기 중 (최대 {upload_timeout}초)...")
+                        action_name = "예약" if scheduled_at else "게시"
+                        self.logger.info(f"{action_name} 버튼 클릭 완료! 서버 처리 및 링크 생성 대기 중 (최대 {upload_timeout}초)...")
                         
                         # 업로드 완료 및 링크 생성 확인 대기 (최대 upload_timeout초)
                         yt_done = False
@@ -238,7 +273,8 @@ class YouTubeUploader(BaseUploader):
                             # 백그라운드 전송 유실 방지를 위한 파일 크기 비례 안전 대기
                             self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
                             page.wait_for_timeout(sync_buffer * 1000)
-                            self.logger.info("🎉 YouTube 최종 업로드 성공 완료!")
+                            result_name = "예약 업로드" if scheduled_at else "업로드"
+                            self.logger.info(f"🎉 YouTube 최종 {result_name} 완료!")
                             browser.close()
                             return True
                         else:

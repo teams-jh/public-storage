@@ -26,9 +26,10 @@ class BaseUploader(ABC):
             "title": str,
             "content": str,
             "tags": str,
-            "full_caption": str
+            "full_caption": str,
+            "time": str,
+            "scheduled_at": datetime | None
         }
         :return: 업로드 성공 여부 (bool)
         """
         pass
-

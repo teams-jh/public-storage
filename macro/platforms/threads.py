@@ -3,6 +3,10 @@ import time
 from pathlib import Path
 import requests
 from platforms.base import BaseUploader
+from platforms.scheduling import (
+    choose_calendar_date,
+    get_scheduled_at,
+)
 from config import (
     CONFIG, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
     get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
@@ -13,6 +17,121 @@ class ThreadsUploader(BaseUploader):
         super().__init__("Threads")
         self.access_token = CONFIG.get("META_ACCESS_TOKEN")
         self.threads_user_id = CONFIG.get("THREADS_USER_ID", "me")
+
+    def _configure_native_schedule(self, page, scheduled_at) -> bool:
+        """Threads 웹 작성 창의 자체 예약 기능을 설정합니다."""
+        more_icons = page.locator(
+            "div[role='dialog'] svg[aria-label='더 보기'], "
+            "div[role='dialog'] svg[aria-label='More']"
+        )
+        if more_icons.count() == 0:
+            self.logger.error("Threads [더 보기] 버튼을 찾지 못했어요. 즉시 게시하지 않고 중단해요.")
+            return False
+
+        more_button = more_icons.last.locator("xpath=ancestor::div[@role='button'][1]")
+        if more_button.count() == 0:
+            more_button = more_icons.last
+        more_button.click(force=True)
+        page.wait_for_timeout(500)
+
+        if not self._click_threads_menu_item(page, ["예약...", "예약…", "Schedule...", "Schedule…"]):
+            self.logger.error("Threads [예약...] 메뉴를 찾지 못했어요. 즉시 게시하지 않고 중단해요.")
+            return False
+        page.wait_for_timeout(700)
+
+        date_set = choose_calendar_date(page, scheduled_at, picker_already_open=True)
+        time_set = self._fill_threads_schedule_time(page, scheduled_at)
+        if not date_set or not time_set:
+            self.logger.error("Threads 예약 날짜 또는 시간을 입력하지 못했어요. 즉시 게시하지 않고 중단해요.")
+            return False
+
+        if not self._click_threads_menu_item(page, ["완료", "Done"]):
+            self.logger.error("Threads 예약 달력의 [완료] 버튼을 찾지 못했어요.")
+            return False
+        page.wait_for_timeout(700)
+
+        final_schedule = page.locator(
+            "div[role='dialog'] div[role='button']:has(span:text-is('예약')), "
+            "div[role='dialog'] button:has-text('예약'), "
+            "div[role='dialog'] div[role='button']:has(span:text-is('Schedule')), "
+            "div[role='dialog'] button:has-text('Schedule')"
+        )
+        if final_schedule.count() == 0:
+            self.logger.error("Threads 작성 창에 최종 [예약] 버튼이 나타나지 않았어요.")
+            return False
+
+        self.logger.info(f"Threads 자체 예약 설정 완료: {scheduled_at:%Y-%m-%d %H:%M}")
+        return True
+
+    def _click_threads_menu_item(self, page, labels: list[str]) -> bool:
+        """보이는 Threads 메뉴/달력에서 정확한 문구의 클릭 요소를 누릅니다."""
+        try:
+            return page.evaluate("""(targetLabels) => {
+                const elements = Array.from(document.querySelectorAll("button, [role='button'], [role='menuitem'], div, span"));
+                const matches = [];
+                const seen = new Set();
+                for (const element of elements) {
+                    const text = element.textContent ? element.textContent.trim() : '';
+                    if (!targetLabels.includes(text)) continue;
+                    const clickable = element.closest("button, [role='button'], [role='menuitem'], [tabindex='0']") || element;
+                    if (seen.has(clickable)) continue;
+                    const rect = clickable.getBoundingClientRect();
+                    if (rect.width <= 0 || rect.height <= 0) continue;
+                    seen.add(clickable);
+                    const semantic = clickable.matches("button, [role='button'], [role='menuitem'], [tabindex='0']");
+                    matches.push({ clickable, semantic, area: rect.width * rect.height });
+                }
+                if (matches.length === 0) return false;
+                matches.sort((a, b) => Number(b.semantic) - Number(a.semantic) || a.area - b.area);
+                matches[0].clickable.click();
+                return true;
+            }""", labels)
+        except Exception:
+            return False
+
+    def _fill_threads_schedule_time(self, page, scheduled_at) -> bool:
+        """Threads 달력 하단의 24시간제 시·분 입력을 설정합니다."""
+        schedule_dialog = page.locator("div[role='dialog']").last
+        hours = schedule_dialog.locator(
+            "input[role='spinbutton'][aria-label='Hours'], input[role='spinbutton'][aria-label*='시']"
+        )
+        minutes = schedule_dialog.locator(
+            "input[role='spinbutton'][aria-label='Minutes'], input[role='spinbutton'][aria-label*='분']"
+        )
+
+        if hours.count() > 0 and minutes.count() > 0:
+            try:
+                for field, value in (
+                    (hours.first, f"{scheduled_at.hour:02d}"),
+                    (minutes.first, f"{scheduled_at.minute:02d}"),
+                ):
+                    field.click(force=True)
+                    field.press("Control+A")
+                    field.type(value)
+                    field.press("Tab")
+                    page.wait_for_timeout(200)
+                return True
+            except Exception:
+                return False
+
+        time_inputs = schedule_dialog.locator(
+            "input[type='time'], input[aria-label*='시간'], input[aria-label*='time' i]"
+        )
+        for index in range(time_inputs.count()):
+            field = time_inputs.nth(index)
+            try:
+                if not field.is_visible():
+                    continue
+                field.fill(scheduled_at.strftime("%H:%M"))
+                field.dispatch_event("input")
+                field.dispatch_event("change")
+                field.press("Tab")
+                return True
+            except Exception:
+                continue
+
+        self.logger.error("Threads 달력 하단의 시간 입력 항목을 찾지 못했어요.")
+        return False
 
     def upload(self, media_path: Path, metadata: dict) -> bool:
         """
@@ -64,6 +183,7 @@ class ThreadsUploader(BaseUploader):
             content = metadata.get("content", "")
             tags_raw = metadata.get("tags", "")
             caption = metadata.get("full_caption", "")
+            scheduled_at = get_scheduled_at(metadata)
 
             from playwright.sync_api import sync_playwright
             user_data_dir = SESSION_DIR / "browser_threads"
@@ -250,66 +370,22 @@ class ThreadsUploader(BaseUploader):
                     except Exception as e:
                         self.logger.warning(f"스레드 텍스트 입력 실패 (무시): {e}")
 
-                # 3. 우측 하단 [게시] 버튼 강력 클릭 (다중 선택자 + JS 위치 계산 + 단축키)
-                self.logger.info("모달 [게시] 버튼 클릭 시도...")
+                if scheduled_at and not self._configure_native_schedule(page, scheduled_at):
+                    browser.close()
+                    return False
+
+                # 3. 우측 하단 [게시]/[예약] 버튼 클릭
+                action_name = "예약" if scheduled_at else "게시"
+                self.logger.info(f"모달 [{action_name}] 버튼 클릭 시도...")
                 page.wait_for_timeout(1000)
 
 
 
-                clicked_post = False
-
-                # 1) JavaScript DOM 위치 기반 가장 아래쪽(모달 우측 하단)의 [게시] 버튼 클릭
-                try:
-                    clicked_post = page.evaluate("""() => {
-                        const elements = Array.from(document.querySelectorAll("div[role='button'], button, div[tabindex='0'], span"));
-                        const candidates = [];
-                        for (const el of elements) {
-                            const text = el.textContent ? el.textContent.trim() : "";
-                            if (text === '게시' || text === 'Post') {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0) {
-                                    candidates.push({ el, bottom: rect.bottom });
-                                }
-                            }
-                        }
-                        if (candidates.length > 0) {
-                            // 화면 가장 아래에 위치한(모달 우측 하단) 버튼 선택
-                            candidates.sort((a, b) => b.bottom - a.bottom);
-                            const target = candidates[0].el;
-                            target.click();
-                            target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                            return true;
-                        }
-                        return false;
-                    }""")
-                except Exception as e:
-                    self.logger.warning(f"JS 버튼 클릭 예외: {e}")
-
-                # 2) Playwright 다중 선택자 강제 클릭
-                post_selectors = [
-                    "div[role='dialog'] div[role='button']:has-text('게시')",
-                    "div[role='dialog'] button:has-text('게시')",
-                    "div[role='dialog'] div:text-is('게시')",
-                    "div[role='button']:has-text('게시')",
-                    "button:has-text('게시')",
-                    "div:text-is('게시')",
-                ]
-                for sel in post_selectors:
-                    try:
-                        btns = page.locator(sel)
-                        if btns.count() > 0:
-                            # 가장 마지막(최신 모달) 요소 클릭
-                            btns.last.click(force=True)
-                            clicked_post = True
-                            break
-                    except Exception:
-                        pass
-
-                # 3) 단축키(Control+Enter) 전송 병행
-                try:
-                    page.keyboard.press("Control+Enter")
-                except Exception:
-                    pass
+                final_action_labels = ["예약", "Schedule"] if scheduled_at else ["게시", "Post"]
+                if not self._click_threads_menu_item(page, final_action_labels):
+                    self.logger.error(f"Threads 최종 [{action_name}] 버튼을 찾지 못했어요.")
+                    browser.close()
+                    return False
 
                 self.logger.info(f"게시 요청 전송 완료. 서버 처리 및 완료 대기 중 (최대 {upload_timeout}초)...")
                 page.wait_for_timeout(3000)
@@ -320,7 +396,10 @@ class ThreadsUploader(BaseUploader):
                     page.wait_for_timeout(1000)
                     
                     # 1) '게시되었습니다' 토스트 확인
-                    toast = page.locator("div:has-text('게시되었습니다'), div:has-text('Posted'), span:has-text('게시되었습니다')")
+                    toast = page.locator(
+                        "div:has-text('게시되었습니다'), div:has-text('Posted'), span:has-text('게시되었습니다'), "
+                        "div:has-text('예약되었습니다'), div:has-text('Scheduled'), span:has-text('예약되었습니다')"
+                    )
                     has_toast = False
                     try:
                         if toast.count() > 0:
@@ -360,7 +439,8 @@ class ThreadsUploader(BaseUploader):
                     # 미디어 크기에 비례하여 넉넉하게 세션 유지 후 정상 종료 (사진 20초, 동영상 30~180초)
                     self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
                     page.wait_for_timeout(sync_buffer * 1000)
-                    self.logger.info("🎉 Threads 최종 업로드 성공 완료!")
+                    result_name = "예약 등록" if scheduled_at else "업로드"
+                    self.logger.info(f"🎉 Threads 최종 {result_name} 완료!")
                     browser.close()
                     return True
                 else:

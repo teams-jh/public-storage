@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -20,6 +21,29 @@ UPLOAD_TIMEOUT_SECONDS = 180
 
 # 로그인 및 2단계 인증 대기 최대 시간 (초 단위: 180초 = 3분)
 LOGIN_TIMEOUT_SECONDS = 180
+
+# input.txt의 [TIME] 예약 시각 형식입니다. 연-월-일 시:분 단위이며 로컬 시간대를 사용합니다.
+SCHEDULE_TIME_FORMAT = "%Y-%m-%d %H:%M"
+
+# Instagram 자체 예약 기능이 허용하는 최대 예약 범위입니다. 단위는 일이며,
+# 값을 늘려도 Instagram 계정/서비스 제한을 넘으면 예약 등록이 거절됩니다.
+INSTAGRAM_SCHEDULE_MAX_DAYS = 75
+
+# TikTok 웹 예약 기능이 허용하는 최소 예약 간격입니다. 단위는 분이며,
+# 이 값보다 가까운 시각은 TikTok에서 예약할 수 없어 즉시 게시 방지를 위해 실패 처리합니다.
+TIKTOK_SCHEDULE_MIN_MINUTES = 15
+
+# TikTok 웹 예약 기능이 허용하는 최대 예약 범위입니다. 단위는 일이며,
+# 이 값보다 먼 시각은 TikTok에서 예약할 수 없어 즉시 게시 방지를 위해 실패 처리합니다.
+TIKTOK_SCHEDULE_MAX_DAYS = 10
+
+
+def parse_scheduled_time(value: str) -> datetime | None:
+    """[TIME] 값을 로컬 datetime으로 변환합니다. 빈 값은 None을 반환합니다."""
+    value = value.strip()
+    if not value:
+        return None
+    return datetime.strptime(value, SCHEDULE_TIME_FORMAT)
 
 def get_media_size_mb(filepath: Path) -> float:
     """미디어 파일 크기를 MB 단위(실수)로 반환합니다."""
@@ -90,7 +114,7 @@ CONFIG = {
 
 def parse_input_file(filepath: Path = INPUT_FILE) -> dict:
     """
-    input.txt 파일을 파싱하여 title, content, tags, ratio 및 통합 caption을 반환합니다.
+    input.txt 파일을 파싱하여 title, content, tags, ratio, time 및 통합 caption을 반환합니다.
     """
     if not filepath.exists():
         return {
@@ -98,6 +122,7 @@ def parse_input_file(filepath: Path = INPUT_FILE) -> dict:
             "content": "",
             "tags": "",
             "ratio": "9:16",
+            "time": "",
             "full_caption": ""
         }
     
@@ -107,11 +132,18 @@ def parse_input_file(filepath: Path = INPUT_FILE) -> dict:
     content = ""
     tags = ""
     ratio = ""
+    scheduled_time = ""
     
-    # 섹션 태그([TITLE], [CONTENT], [TAGS], [RATIO])가 있는 경우 분리 파싱
-    if "[TITLE]" in raw_text or "[CONTENT]" in raw_text or "[TAGS]" in raw_text or "[RATIO]" in raw_text:
+    # 섹션 태그([TITLE], [CONTENT], [TAGS], [RATIO], [TIME])가 있는 경우 분리 파싱
+    if any(section in raw_text for section in ("[TITLE]", "[CONTENT]", "[TAGS]", "[RATIO]", "[TIME]")):
         current_section = None
-        sections = {"[TITLE]": [], "[CONTENT]": [], "[TAGS]": [], "[RATIO]": []}
+        sections = {
+            "[TITLE]": [],
+            "[CONTENT]": [],
+            "[TAGS]": [],
+            "[RATIO]": [],
+            "[TIME]": [],
+        }
         
         for line in raw_text.splitlines():
             line_strip = line.strip()
@@ -124,6 +156,7 @@ def parse_input_file(filepath: Path = INPUT_FILE) -> dict:
         content = "\n".join(sections["[CONTENT]"]).strip()
         tags = "\n".join(sections["[TAGS]"]).strip()
         ratio = "\n".join(sections["[RATIO]"]).strip()
+        scheduled_time = "\n".join(sections["[TIME]"]).strip()
     else:
         # 섹션 태그가 없는 경우 첫 줄을 제목, 나머지를 본문으로 처리
         lines = raw_text.splitlines()
@@ -146,6 +179,7 @@ def parse_input_file(filepath: Path = INPUT_FILE) -> dict:
         "content": content or raw_text,
         "tags": tags,
         "ratio": ratio or "9:16",
+        "time": scheduled_time,
         "full_caption": full_caption or raw_text
     }
 
@@ -185,5 +219,3 @@ def get_target_videos(upload_dir: Path = UPLOAD_DIR) -> list[Path]:
     (하위 호환성 유지) upload 디렉토리에서 업로드 대상 파일 목록을 가져옵니다.
     """
     return get_target_media(upload_dir)
-
-

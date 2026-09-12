@@ -1,6 +1,7 @@
 import sys
 import os
 import argparse
+from datetime import datetime
 from pathlib import Path
 
 # Windows 콘솔 한글 깨짐 방지
@@ -11,7 +12,14 @@ if sys.platform == "win32":
     except AttributeError:
         pass
 
-from config import parse_input_file, get_target_media, get_media_type, UPLOAD_DIR, INPUT_FILE
+from config import (
+    INPUT_FILE,
+    UPLOAD_DIR,
+    get_media_type,
+    get_target_media,
+    parse_input_file,
+    parse_scheduled_time,
+)
 from platforms import (
     InstagramUploader,
     ThreadsUploader,
@@ -34,6 +42,30 @@ MEDIA_TYPE_NAMES = {
     "video": "동영상 (Video)",
     "image": "사진 (Image)",
 }
+
+def prepare_scheduled_time(metadata: dict) -> None:
+    """예약 값을 검증하고 플랫폼 업로더가 사용할 datetime을 메타데이터에 넣습니다."""
+    scheduled_time_text = metadata.get("time", "")
+    if not scheduled_time_text:
+        metadata["scheduled_at"] = None
+        return
+
+    try:
+        scheduled_at = parse_scheduled_time(scheduled_time_text)
+    except ValueError:
+        print(f"\n⚠️ 예약 시각 형식이 올바르지 않아 예약 없이 바로 업로드해요: {scheduled_time_text}")
+        print(" - 입력 형식: YYYY-MM-DD HH:MM (예: 2026-09-12 19:30)")
+        metadata["scheduled_at"] = None
+        return
+
+    if scheduled_at and scheduled_at <= datetime.now():
+        print(f"\nℹ️ 이미 지난 예약 시각이라 예약 설정을 무시해요: {scheduled_time_text}")
+        metadata["scheduled_at"] = None
+        return
+
+    metadata["scheduled_at"] = scheduled_at
+    print(f"\n⏰ 각 SNS의 자체 예약 기능으로 게시 시각을 설정해요: {scheduled_time_text}")
+
 
 def print_banner():
     print("=" * 65)
@@ -68,6 +100,8 @@ def main():
     print(f" - 내용 요약:\n{metadata['content'][:120]}...")
     if metadata.get('ratio'):
         print(f" - 비율(Ratio): {metadata['ratio']}")
+    if metadata.get('time'):
+        print(f" - 예약 시각(Time): {metadata['time']}")
     if metadata['tags']:
         print(f" - 태그(Tags): {metadata['tags']}")
 
@@ -105,6 +139,8 @@ def main():
     if args.platform == "all":
         print(" (ℹ️ 페이스북은 현재 비활성화되어 건너뜁니다)")
     print("-" * 65)
+
+    prepare_scheduled_time(metadata)
 
     results = {}
     for plat_key in selected_platforms:
