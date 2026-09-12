@@ -38,12 +38,14 @@ attendance-check/sessions/
 # Browser Sessions & Playwright User Data
 # ==========================================
 sessions/
+sessions2/
 .playwright/
 
 # ==========================================
 # Local Upload Media Files (Do not commit user media)
 # ==========================================
 upload/*
+upload2/*
 !upload/.gitkeep
 
 # ==========================================

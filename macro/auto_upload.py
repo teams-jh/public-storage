@@ -93,9 +93,9 @@ def main():
 
     print_banner()
 
-    # 1. input.txt 내용 확인
+    # 1. 입력 파일 내용 확인
     metadata = parse_input_file(INPUT_FILE)
-    print(f"\n📄 [1] input.txt 로드 완료:")
+    print(f"\n📄 [1] {INPUT_FILE.name} 로드 완료:")
     print(f" - 제목(Title): {metadata['title']}")
     print(f" - 내용 요약:\n{metadata['content'][:120]}...")
     if metadata.get('ratio'):
@@ -117,8 +117,8 @@ def main():
     else:
         media_list = get_target_media(UPLOAD_DIR)
         if not media_list:
-            print(f"\n⚠️ 'macro/upload/' 폴더에 업로드할 미디어 파일이 없습니다.")
-            print(f" 👉 동영상(.mp4, .mov 등), 사진(.jpg, .png 등), GIF(.gif) 파일을 macro/upload/ 폴더에 넣고 다시 실행해 주세요.")
+            print(f"\n⚠️ '{UPLOAD_DIR}' 폴더에 업로드할 미디어 파일이 없습니다.")
+            print(f" 👉 동영상(.mp4, .mov 등), 사진(.jpg, .png 등), GIF(.gif) 파일을 '{UPLOAD_DIR}' 폴더에 넣고 다시 실행해 주세요.")
             sys.exit(1)
         target_media = media_list[0]
         media_type = get_media_type(target_media)

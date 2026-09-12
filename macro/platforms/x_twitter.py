@@ -4,7 +4,7 @@ from pathlib import Path
 from platforms.base import BaseUploader
 from platforms.scheduling import get_scheduled_at
 from config import (
-    CONFIG, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
+    CONFIG, FORCE_BROWSER_UPLOAD, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
     get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
 )
 
@@ -274,7 +274,7 @@ class TwitterXUploader(BaseUploader):
         # 방법 1: Tweepy를 통한 API 업로드
         if scheduled_at:
             self.logger.info("X 자체 예약 기능을 사용하기 위해 Playwright 모드로 진행해요.")
-        elif all([self.api_key, self.api_secret, self.access_token, self.access_token_secret]):
+        elif not FORCE_BROWSER_UPLOAD and all([self.api_key, self.api_secret, self.access_token, self.access_token_secret]):
             try:
                 import tweepy
                 self.logger.info("Tweepy API를 통해 미디어 업로드 및 트윗 작성을 진행합니다...")

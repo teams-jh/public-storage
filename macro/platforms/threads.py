@@ -7,7 +7,7 @@ from platforms.scheduling import (
     get_scheduled_at,
 )
 from config import (
-    CONFIG, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
+    CONFIG, FORCE_BROWSER_UPLOAD, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
     get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
 )
 
@@ -646,7 +646,7 @@ class ThreadsUploader(BaseUploader):
 
 
         # 방법 1: 공식 Threads API (공개 URL 호스팅 미디어 필요)
-        if self.access_token:
+        if self.access_token and not FORCE_BROWSER_UPLOAD:
             self.logger.info("Threads API를 통한 업로드를 시도합니다.")
             pass
 

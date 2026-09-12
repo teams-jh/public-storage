@@ -7,7 +7,7 @@ from platforms.scheduling import (
     get_scheduled_at,
 )
 from config import (
-    CONFIG, INSTAGRAM_SCHEDULE_MAX_DAYS, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
+    CONFIG, DISABLE_AUTO_LOGIN, FORCE_BROWSER_UPLOAD, INSTAGRAM_SCHEDULE_MAX_DAYS, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
     get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
 )
 
@@ -297,8 +297,9 @@ class InstagramUploader(BaseUploader):
         self.logger.info(f"캡션 내용 요약:\n{caption[:100]}...")
 
         # 예약 게시에는 Instagram 자체 예약 UI가 필요하므로 모바일 API를 사용하지 않습니다.
-        if scheduled_at:
-            self.logger.info("Instagram 자체 콘텐츠 예약 기능을 사용하기 위해 Playwright 모드로 진행해요.")
+        if scheduled_at or FORCE_BROWSER_UPLOAD:
+            reason = "자체 콘텐츠 예약" if scheduled_at else "별도 계정 브라우저 프로필"
+            self.logger.info(f"Instagram {reason}을 사용하기 위해 Playwright 모드로 진행해요.")
         else:
             # 방법 1: instagrapi 라이브러리 사용 (추천: 모바일 API)
             try:
@@ -310,7 +311,7 @@ class InstagramUploader(BaseUploader):
                     self.logger.info("저장된 Instagram 세션을 로드합니다.")
                     cl.load_settings(session_file)
 
-                if self.username and self.password:
+                if self.username and self.password and not DISABLE_AUTO_LOGIN:
                     cl.login(self.username, self.password)
                     cl.dump_settings(session_file)
                     self.logger.info("Instagram 로그인 성공")

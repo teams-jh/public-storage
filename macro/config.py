@@ -5,10 +5,23 @@ from dotenv import load_dotenv
 
 # 기본 디렉토리 설정
 BASE_DIR = Path(__file__).resolve().parent
-UPLOAD_DIR = BASE_DIR / "upload"
-INPUT_FILE = BASE_DIR / "input.txt"
-SESSION_DIR = BASE_DIR / "sessions"
+
+
+def resolve_macro_path(environment_name: str, default_name: str) -> Path:
+    """환경 변수의 절대/상대 경로를 macro 폴더 기준 경로로 변환합니다."""
+    configured_path = Path(os.getenv(environment_name, default_name))
+    return configured_path if configured_path.is_absolute() else BASE_DIR / configured_path
+
+
+UPLOAD_DIR = resolve_macro_path("MACRO_UPLOAD_DIR", "upload")
+INPUT_FILE = resolve_macro_path("MACRO_INPUT_FILE", "input.txt")
+SESSION_DIR = resolve_macro_path("MACRO_SESSION_DIR", "sessions")
+SCREENSHOT_DIR = resolve_macro_path("MACRO_SCREENSHOT_DIR", "screenshot")
 SESSION_DIR.mkdir(exist_ok=True)
+
+# 두 번째 계정처럼 브라우저 프로필 로그인이 필요한 실행에서는 API와 자동 로그인을 사용하지 않습니다.
+FORCE_BROWSER_UPLOAD = os.getenv("MACRO_FORCE_BROWSER_UPLOAD", "0") == "1"
+DISABLE_AUTO_LOGIN = os.getenv("MACRO_DISABLE_AUTO_LOGIN", "0") == "1"
 
 # .env 로드
 load_dotenv(BASE_DIR / ".env")

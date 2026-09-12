@@ -9,7 +9,7 @@ from platforms.scheduling import (
     get_scheduled_at,
 )
 from config import (
-    CONFIG, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
+    CONFIG, FORCE_BROWSER_UPLOAD, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
     get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
 )
 
@@ -326,7 +326,7 @@ class YouTubeUploader(BaseUploader):
 
         # 방법 1: YouTube Data API v3
         secrets_path = Path(self.client_secrets_file)
-        if secrets_path.exists():
+        if secrets_path.exists() and not FORCE_BROWSER_UPLOAD:
             try:
                 self.logger.info("YouTube Data API v3를 통해 업로드를 시작합니다...")
                 return self._upload_via_api(media_path, title, description, tags, scheduled_at)

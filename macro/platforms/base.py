@@ -3,6 +3,8 @@ from datetime import datetime
 from pathlib import Path
 import logging
 
+from config import SCREENSHOT_DIR
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
@@ -20,8 +22,7 @@ class BaseUploader(ABC):
     def save_result_screenshot(self, page, result: str = "success") -> Path | None:
         """브라우저 업로드 결과 화면을 macro/screenshot 폴더에 저장합니다."""
         try:
-            screenshot_dir = Path(__file__).resolve().parent.parent / "screenshot"
-            screenshot_dir.mkdir(parents=True, exist_ok=True)
+            SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
             safe_platform = "".join(
                 character.lower() if character.isalnum() else "_"
                 for character in self.platform_name
@@ -31,7 +32,7 @@ class BaseUploader(ABC):
                 for character in result
             ).strip("_")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            screenshot_path = screenshot_dir / (
+            screenshot_path = SCREENSHOT_DIR / (
                 f"{safe_platform}_{safe_result}_{timestamp}.png"
             )
             page.wait_for_timeout(500)
