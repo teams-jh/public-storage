@@ -4,7 +4,6 @@ from pathlib import Path
 import requests
 from platforms.base import BaseUploader
 from platforms.scheduling import (
-    choose_calendar_date,
     get_scheduled_at,
 )
 from config import (
@@ -21,17 +20,42 @@ class ThreadsUploader(BaseUploader):
     def _configure_native_schedule(self, page, scheduled_at) -> bool:
         """Threads 웹 작성 창의 자체 예약 기능을 설정합니다."""
         more_icons = page.locator(
-            "div[role='dialog'] svg[aria-label='더 보기'], "
-            "div[role='dialog'] svg[aria-label='More']"
+            "svg[aria-label='더 보기'], "
+            "svg[aria-label='More'], "
+            "svg:has(title:text-is('더 보기')), "
+            "svg:has(title:text-is('More'))"
         )
         if more_icons.count() == 0:
             self.logger.error("Threads [더 보기] 버튼을 찾지 못했어요. 즉시 게시하지 않고 중단해요.")
             return False
 
-        more_button = more_icons.last.locator("xpath=ancestor::div[@role='button'][1]")
-        if more_button.count() == 0:
-            more_button = more_icons.last
-        more_button.click(force=True)
+        more_clicked = False
+        for index in range(more_icons.count() - 1, -1, -1):
+            more_icon = more_icons.nth(index)
+            try:
+                if not more_icon.is_visible():
+                    continue
+
+                # 실제 화면에서 aria-label은 SVG에 있고 클릭 이벤트는 바깥
+                # role=button 요소에 걸려 있어요. SVG 중심을 누르면 두 구조를
+                # 모두 처리하면서 중간 래퍼 div의 변화에도 영향을 받지 않아요.
+                more_icon.scroll_into_view_if_needed()
+                box = more_icon.bounding_box()
+                if box:
+                    page.mouse.click(
+                        box["x"] + box["width"] / 2,
+                        box["y"] + box["height"] / 2,
+                    )
+                else:
+                    more_icon.click(force=True)
+                more_clicked = True
+                break
+            except Exception:
+                continue
+
+        if not more_clicked:
+            self.logger.error("Threads [더 보기] 버튼이 보이지만 클릭하지 못했어요. 즉시 게시하지 않고 중단해요.")
+            return False
         page.wait_for_timeout(500)
 
         if not self._click_threads_menu_item(page, ["예약...", "예약…", "Schedule...", "Schedule…"]):
@@ -39,8 +63,21 @@ class ThreadsUploader(BaseUploader):
             return False
         page.wait_for_timeout(700)
 
-        date_set = choose_calendar_date(page, scheduled_at, picker_already_open=True)
-        time_set = self._fill_threads_schedule_time(page, scheduled_at)
+        self.logger.info(f"Threads 예약 입력 시작: {scheduled_at:%Y-%m-%d %H:%M}")
+        try:
+            date_set = self._select_threads_calendar_date(page, scheduled_at)
+        except Exception as error:
+            self.logger.error(f"Threads 예약 날짜 처리 중 문제가 생겼어요: {error}")
+            date_set = False
+        try:
+            time_set = self._fill_threads_schedule_time(page, scheduled_at)
+        except Exception as error:
+            self.logger.error(f"Threads 예약 시간 처리 중 문제가 생겼어요: {error}")
+            time_set = False
+        self.logger.info(
+            f"Threads 예약 입력 결과 - 날짜: {'완료' if date_set else '실패'}, "
+            f"시간: {'완료' if time_set else '실패'}"
+        )
         if not date_set or not time_set:
             self.logger.error("Threads 예약 날짜 또는 시간을 입력하지 못했어요. 즉시 게시하지 않고 중단해요.")
             return False
@@ -50,13 +87,7 @@ class ThreadsUploader(BaseUploader):
             return False
         page.wait_for_timeout(700)
 
-        final_schedule = page.locator(
-            "div[role='dialog'] div[role='button']:has(span:text-is('예약')), "
-            "div[role='dialog'] button:has-text('예약'), "
-            "div[role='dialog'] div[role='button']:has(span:text-is('Schedule')), "
-            "div[role='dialog'] button:has-text('Schedule')"
-        )
-        if final_schedule.count() == 0:
+        if self._get_threads_final_schedule_point(page) is None:
             self.logger.error("Threads 작성 창에 최종 [예약] 버튼이 나타나지 않았어요.")
             return False
 
@@ -89,35 +120,115 @@ class ThreadsUploader(BaseUploader):
         except Exception:
             return False
 
+    @staticmethod
+    def _get_threads_final_schedule_point(page):
+        """시계 아이콘과 예약 문구가 함께 있는 최종 버튼의 중심 좌표를 찾아요."""
+        try:
+            return page.evaluate(r"""() => {
+                const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0 &&
+                        style.display !== 'none' && style.visibility !== 'hidden';
+                };
+                const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+                const candidates = Array.from(document.querySelectorAll('div'))
+                    .filter(label => ['예약', 'Schedule'].includes(normalize(label.textContent)))
+                    .map(label => {
+                        const content = label.parentElement;
+                        if (!content || !content.querySelector('svg')) return null;
+                        const clickable = content.closest(
+                            'button, [role="button"], [tabindex="0"], [data-pressable-container="true"]'
+                        ) || content;
+                        if (!visible(clickable)) return null;
+                        const rect = clickable.getBoundingClientRect();
+                        const semantic = clickable.matches(
+                            'button, [role="button"], [tabindex="0"], [data-pressable-container="true"]'
+                        );
+                        return {
+                            x: rect.x + rect.width / 2,
+                            y: rect.y + rect.height / 2,
+                            semantic,
+                            area: rect.width * rect.height,
+                        };
+                    })
+                    .filter(Boolean)
+                    .sort((a, b) => Number(b.semantic) - Number(a.semantic) || a.area - b.area);
+                return candidates.length > 0 ? { x: candidates[0].x, y: candidates[0].y } : null;
+            }""")
+        except Exception:
+            return None
+
+    def _click_threads_final_schedule(self, page) -> bool:
+        """날짜와 시간을 확정한 뒤 시계 아이콘이 있는 최종 예약 버튼을 눌러요."""
+        point = self._get_threads_final_schedule_point(page)
+        if point is None:
+            return False
+        try:
+            page.mouse.click(point["x"], point["y"])
+            return True
+        except Exception:
+            return False
+
     def _fill_threads_schedule_time(self, page, scheduled_at) -> bool:
         """Threads 달력 하단의 24시간제 시·분 입력을 설정합니다."""
-        schedule_dialog = page.locator("div[role='dialog']").last
-        hours = schedule_dialog.locator(
-            "input[role='spinbutton'][aria-label='Hours'], input[role='spinbutton'][aria-label*='시']"
+        # Threads의 예약 달력은 작성 dialog 바깥의 포털에 렌더링돼요.
+        # 따라서 dialog로 범위를 제한하지 않고 페이지 전체의 보이는 필드를 찾아요.
+        hours = page.locator(
+            "input[placeholder='hh'], "
+            "[role='spinbutton'][aria-label*='hour' i], "
+            "[role='spinbutton'][aria-label*='시'], "
+            "input[aria-label*='hour' i], input[aria-label*='시']"
         )
-        minutes = schedule_dialog.locator(
-            "input[role='spinbutton'][aria-label='Minutes'], input[role='spinbutton'][aria-label*='분']"
+        minutes = page.locator(
+            "input[placeholder='mm'], "
+            "[role='spinbutton'][aria-label*='minute' i], "
+            "[role='spinbutton'][aria-label*='분'], "
+            "input[aria-label*='minute' i], input[aria-label*='분']"
         )
 
-        if hours.count() > 0 and minutes.count() > 0:
-            try:
-                for field, value in (
-                    (hours.first, f"{scheduled_at.hour:02d}"),
-                    (minutes.first, f"{scheduled_at.minute:02d}"),
-                ):
-                    field.click(force=True)
-                    field.press("Control+A")
-                    field.type(value)
-                    field.press("Tab")
-                    page.wait_for_timeout(200)
+        visible_hour = self._last_visible(hours)
+        visible_minute = self._last_visible(minutes)
+        if visible_hour is not None and visible_minute is not None:
+            hour_set = self._replace_threads_time_value(
+                visible_hour, f"{scheduled_at.hour:02d}"
+            )
+            minute_set = self._replace_threads_time_value(
+                visible_minute, f"{scheduled_at.minute:02d}"
+            )
+            if hour_set and minute_set:
+                page.wait_for_timeout(300)
                 return True
-            except Exception:
-                return False
 
-        time_inputs = schedule_dialog.locator(
-            "input[type='time'], input[aria-label*='시간'], input[aria-label*='time' i]"
+        # aria-label이 없는 구현에서는 시와 분이 연속된 두 숫자 필드로 나와요.
+        numeric_fields = page.locator(
+            "input[role='spinbutton'], [contenteditable='true'][role='spinbutton'], "
+            "input[inputmode='numeric']"
         )
-        for index in range(time_inputs.count()):
+        visible_numeric_fields = []
+        for index in range(numeric_fields.count()):
+            field = numeric_fields.nth(index)
+            try:
+                if field.is_visible():
+                    visible_numeric_fields.append(field)
+            except Exception:
+                continue
+        if len(visible_numeric_fields) >= 2:
+            hour_set = self._replace_threads_time_value(
+                visible_numeric_fields[-2], f"{scheduled_at.hour:02d}"
+            )
+            minute_set = self._replace_threads_time_value(
+                visible_numeric_fields[-1], f"{scheduled_at.minute:02d}"
+            )
+            if hour_set and minute_set:
+                page.wait_for_timeout(300)
+                return True
+
+        time_inputs = page.locator(
+            "input[type='time'], input[name*='time' i], "
+            "input[aria-label='시간'], input[aria-label='Time' i]"
+        )
+        for index in range(time_inputs.count() - 1, -1, -1):
             field = time_inputs.nth(index)
             try:
                 if not field.is_visible():
@@ -130,8 +241,326 @@ class ThreadsUploader(BaseUploader):
             except Exception:
                 continue
 
+        # 현재 Threads UI는 13 : 00처럼 시와 분을 별도 텍스트 조각으로
+        # 렌더링하기도 해요. 두 숫자의 실제 화면 좌표를 눌러 값을 입력해요.
+        time_segments = page.evaluate(r"""() => {
+            const visible = element => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 &&
+                    style.display !== 'none' && style.visibility !== 'hidden';
+            };
+            const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+            const elements = Array.from(document.querySelectorAll('div, span, button'));
+            const timeRoots = elements.filter(element =>
+                /^\d{1,2}\s*:\s*\d{2}$/.test(normalize(element.textContent)) && visible(element)
+            );
+            timeRoots.sort((a, b) => {
+                const ar = a.getBoundingClientRect();
+                const br = b.getBoundingClientRect();
+                return ar.width * ar.height - br.width * br.height;
+            });
+
+            for (const root of timeRoots) {
+                const parts = Array.from(root.querySelectorAll('*'))
+                    .filter(element => /^\d{1,2}$/.test(normalize(element.textContent)) && visible(element))
+                    .map(element => {
+                        const rect = element.getBoundingClientRect();
+                        return {
+                            x: rect.x + rect.width / 2,
+                            y: rect.y + rect.height / 2,
+                            left: rect.left,
+                            area: rect.width * rect.height,
+                        };
+                    })
+                    .sort((a, b) => a.left - b.left || a.area - b.area);
+                const distinct = [];
+                for (const part of parts) {
+                    if (!distinct.some(item => Math.abs(item.x - part.x) < 2)) distinct.push(part);
+                }
+                if (distinct.length >= 2) return distinct.slice(0, 2);
+            }
+            return [];
+        }""")
+        if len(time_segments) >= 2:
+            try:
+                for segment, value in zip(
+                    time_segments,
+                    (f"{scheduled_at.hour:02d}", f"{scheduled_at.minute:02d}"),
+                ):
+                    page.mouse.click(segment["x"], segment["y"])
+                    page.keyboard.press("Control+A")
+                    page.keyboard.type(value)
+                    page.wait_for_timeout(200)
+                page.keyboard.press("Tab")
+                page.wait_for_timeout(300)
+                return True
+            except Exception:
+                pass
+
         self.logger.error("Threads 달력 하단의 시간 입력 항목을 찾지 못했어요.")
         return False
+
+    def _select_threads_calendar_date(self, page, scheduled_at) -> bool:
+        """Threads 날짜 grid에서 연·월·일이 일치하는 gridcell 자체를 눌러요."""
+        date_grid = page.locator(
+            "[role='grid'][aria-label='날짜 선택'], "
+            "[role='grid'][aria-label*='date' i]"
+        )
+        visible_grid = self._last_visible(date_grid)
+        if visible_grid is None:
+            self.logger.error("Threads [날짜 선택] 그리드를 찾지 못했어요.")
+            return False
+
+        displayed_month = self._get_threads_calendar_month(page)
+        if displayed_month is None:
+            self.logger.error("Threads 달력의 표시 연월을 읽지 못했어요.")
+            return False
+
+        displayed_year, displayed_month_number = displayed_month
+        self.logger.info(
+            f"Threads 현재 달력: {displayed_year:04d}-{displayed_month_number:02d}, "
+            f"목표 달력: {scheduled_at.year:04d}-{scheduled_at.month:02d}"
+        )
+        month_steps = (
+            (scheduled_at.year - displayed_year) * 12
+            + scheduled_at.month
+            - displayed_month_number
+        )
+        month_button_label = "다음 달" if month_steps >= 0 else "지난달"
+        english_button_label = "Next month" if month_steps >= 0 else "Previous month"
+        direction = 1 if month_steps >= 0 else -1
+        displayed_month_index = displayed_year * 12 + displayed_month_number - 1
+        for step in range(abs(month_steps)):
+            month_buttons = page.locator(
+                f"button[aria-label='{month_button_label}'], "
+                f"button[aria-label='{english_button_label}']"
+            )
+            month_button = self._last_visible(month_buttons)
+            if month_button is None:
+                self.logger.error(f"Threads [{month_button_label}] 버튼을 찾지 못했어요.")
+                return False
+            month_button.scroll_into_view_if_needed()
+            month_button_box = month_button.bounding_box()
+            if month_button_box is None:
+                self.logger.error(f"Threads [{month_button_label}] 버튼 위치를 읽지 못했어요.")
+                return False
+            page.mouse.click(
+                month_button_box["x"] + month_button_box["width"] / 2,
+                month_button_box["y"] + month_button_box["height"] / 2,
+            )
+            expected_month_index = displayed_month_index + direction * (step + 1)
+            expected_year, zero_based_month = divmod(expected_month_index, 12)
+            expected_month = zero_based_month + 1
+            try:
+                page.wait_for_function(
+                    r"""(target) => Array.from(document.querySelectorAll('h2, span'))
+                        .some(element => {
+                            const rect = element.getBoundingClientRect();
+                            const text = (element.textContent || '').replace(/\s+/g, ' ').trim();
+                            return rect.width > 0 && rect.height > 0 &&
+                                text === `${target.year}년 ${target.month}월`;
+                        })""",
+                    arg={"year": expected_year, "month": expected_month},
+                    timeout=3000,
+                )
+            except Exception:
+                self.logger.error(
+                    f"Threads 달력이 {expected_year}년 {expected_month}월로 바뀌지 않았어요."
+                )
+                return False
+
+        final_displayed_month = self._get_threads_calendar_month(page)
+        if final_displayed_month != (scheduled_at.year, scheduled_at.month):
+            self.logger.error(
+                f"Threads 달력 월 이동에 실패했어요: "
+                f"목표 {scheduled_at.year}년 {scheduled_at.month}월"
+            )
+            return False
+
+        target_prefix = f"{scheduled_at.year}년 {scheduled_at.month}월 {scheduled_at.day}일"
+        visible_grid = self._last_visible(date_grid)
+        if visible_grid is None:
+            self.logger.error("Threads 월 이동 후 [날짜 선택] 그리드를 찾지 못했어요.")
+            return False
+        cells = visible_grid.locator("[role='gridcell']")
+        for index in range(cells.count()):
+            cell = cells.nth(index)
+            try:
+                if not cell.is_visible() or cell.get_attribute("aria-disabled") == "true":
+                    continue
+                cell_text = " ".join(cell.inner_text().split())
+                if target_prefix not in cell_text:
+                    continue
+
+                cell.scroll_into_view_if_needed()
+                cell_box = cell.bounding_box()
+                if cell_box is None:
+                    continue
+                page.mouse.click(
+                    cell_box["x"] + cell_box["width"] / 2,
+                    cell_box["y"] + cell_box["height"] / 2,
+                )
+                page.wait_for_timeout(400)
+                self.logger.info(f"Threads 예약 날짜 선택 완료: {scheduled_at:%Y-%m-%d}")
+                return True
+            except Exception:
+                continue
+
+        self.logger.error(f"Threads 예약 날짜 셀을 찾지 못했어요: {scheduled_at:%Y-%m-%d}")
+        return False
+
+    @staticmethod
+    def _get_threads_calendar_month(page):
+        """현재 화면에 표시된 Threads 달력의 (연도, 월)를 읽어요."""
+        try:
+            result = page.evaluate(r"""() => {
+                const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0 &&
+                        style.display !== 'none' && style.visibility !== 'hidden';
+                };
+                const headings = Array.from(document.querySelectorAll('h2, span'));
+                for (const heading of headings) {
+                    if (!visible(heading)) continue;
+                    const text = (heading.textContent || '').replace(/\s+/g, ' ').trim();
+                    const match = text.match(/^(\d{4})년\s*(\d{1,2})월$/);
+                    if (match) return { year: Number(match[1]), month: Number(match[2]) };
+                }
+                return null;
+            }""")
+            if result is None:
+                return None
+            return result["year"], result["month"]
+        except Exception:
+            return None
+
+    @staticmethod
+    def _last_visible(locator):
+        """로케이터 중 화면에 보이는 마지막 요소를 반환해요."""
+        for index in range(locator.count() - 1, -1, -1):
+            candidate = locator.nth(index)
+            try:
+                if candidate.is_visible():
+                    return candidate
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _replace_threads_time_value(field, value: str) -> bool:
+        """Threads의 input 또는 contenteditable 시간 조각 값을 교체해요."""
+        try:
+            field.click(force=True)
+            field.press("Control+A")
+            try:
+                field.fill(value)
+            except Exception:
+                field.press_sequentially(value)
+            field.dispatch_event("input")
+            field.dispatch_event("change")
+            field.press("Tab")
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _find_threads_composer(page):
+        """다른 게시글 대화창을 제외하고 보이는 새 스레드 작성창만 찾아요."""
+        dialogs = page.locator("div[role='dialog']")
+        composer_titles = ("새로운 스레드", "새 스레드", "New thread")
+        for index in range(dialogs.count() - 1, -1, -1):
+            dialog = dialogs.nth(index)
+            try:
+                if not dialog.is_visible():
+                    continue
+                dialog_text = " ".join(dialog.inner_text().split())
+                if not any(title in dialog_text for title in composer_titles):
+                    continue
+                editors = dialog.locator(
+                    "div[role='textbox'], div[contenteditable='true'], input[type='file']"
+                )
+                if editors.count() > 0:
+                    return dialog
+            except Exception:
+                continue
+
+        # Threads가 작성창에 role=dialog를 부여하지 않는 UI도 처리해요.
+        title_elements = page.locator(
+            "h1:text-is('새로운 스레드'), h2:text-is('새로운 스레드'), "
+            "h1:text-is('새 스레드'), h2:text-is('새 스레드'), "
+            "h1:text-is('New thread'), h2:text-is('New thread'), "
+            "div:text-is('새로운 스레드'), span:text-is('새로운 스레드'), "
+            "div:text-is('새 스레드'), span:text-is('새 스레드'), "
+            "div:text-is('New thread'), span:text-is('New thread')"
+        )
+        for index in range(title_elements.count() - 1, -1, -1):
+            title = title_elements.nth(index)
+            try:
+                if not title.is_visible():
+                    continue
+                container = title.locator(
+                    "xpath=ancestor::div[.//*[@role='textbox' or @contenteditable='true']][1]"
+                )
+                if container.count() == 0 or not container.first.is_visible():
+                    continue
+                return container.first
+            except Exception:
+                continue
+        return None
+
+    def _open_threads_composer(self, page):
+        """피드 게시글을 건드리지 않고 Threads 새 게시물 작성창을 열어요."""
+        composer = self._find_threads_composer(page)
+        if composer is not None:
+            return composer
+
+        create_triggers = page.locator(
+            "svg[aria-label='만들기'], svg[aria-label='Create']"
+        )
+        for index in range(create_triggers.count()):
+            trigger = create_triggers.nth(index)
+            try:
+                if not trigger.is_visible():
+                    continue
+                click_target = trigger.locator(
+                    "xpath=ancestor-or-self::*[self::button or @role='button' or @tabindex='0'][1]"
+                )
+                if click_target.count() == 0:
+                    click_target = trigger
+                else:
+                    click_target = click_target.first
+
+                unsafe_target = click_target.evaluate(r"""element => Boolean(
+                    element.closest('article, [role="article"], div[role="dialog"]') ||
+                    element.closest('a[href*="/post/"], a[href*="/t/"]')
+                )""")
+                if unsafe_target:
+                    self.logger.warning("Threads 피드 게시글 안의 요소는 작성 버튼 후보에서 제외했어요.")
+                    continue
+
+                click_target.scroll_into_view_if_needed()
+                box = click_target.bounding_box()
+                if box:
+                    page.mouse.click(
+                        box["x"] + box["width"] / 2,
+                        box["y"] + box["height"] / 2,
+                    )
+                else:
+                    click_target.click(force=True)
+
+                for _ in range(10):
+                    page.wait_for_timeout(300)
+                    composer = self._find_threads_composer(page)
+                    if composer is not None:
+                        self.logger.info("Threads 새 게시물 작성창을 확인했어요.")
+                        return composer
+            except Exception:
+                continue
+
+        self.logger.error("Threads 새 게시물 작성창을 열지 못했어요. 피드에서는 아무것도 업로드하지 않아요.")
+        return None
 
     def upload(self, media_path: Path, metadata: dict) -> bool:
         """
@@ -257,25 +686,14 @@ class ThreadsUploader(BaseUploader):
                 self.logger.info("새 스레드 작성 시작...")
                 page.wait_for_timeout(2000)
                 
-                # 작성 모달(dialog)이 아직 안 열렸다면 '스레드를 시작하세요...' 또는 만들기 버튼 클릭
-                dialog = page.locator("div[role='dialog']")
-                if dialog.count() == 0:
-                    create_triggers = page.locator(
-                        "div:has-text('스레드를 시작하세요...'), "
-                        "div:has-text('Start a thread...'), "
-                        "svg[aria-label='만들기'], "
-                        "svg[aria-label='Create']"
-                    )
-                    if create_triggers.count() > 0:
-                        try:
-                            create_triggers.first.click()
-                            page.wait_for_timeout(1500)
-                        except Exception:
-                            pass
+                composer = self._open_threads_composer(page)
+                if composer is None:
+                    browser.close()
+                    return False
 
                 # 1. 모달 내부 파일 먼저 첨부
                 self.logger.info(f"1단계: {media_type.upper()} 파일({media_path.name}) 첨부 중...")
-                file_input = page.locator("div[role='dialog'] input[type='file'], input[type='file']")
+                file_input = composer.locator("input[type='file']")
                 if file_input.count() > 0:
                     try:
                         file_input.first.set_input_files(str(media_path.resolve()))
@@ -288,7 +706,7 @@ class ThreadsUploader(BaseUploader):
 
                 # 2. 본문 텍스트 및 해시태그 순차 입력
                 self.logger.info("2단계: 스레드 내용 및 해시태그 입력 중...")
-                textbox = page.locator("div[role='dialog'] div[role='textbox'], div[role='dialog'] div[contenteditable='true'], div[role='textbox']")
+                textbox = composer.locator("div[role='textbox'], div[contenteditable='true']")
                 if textbox.count() > 0:
                     try:
                         textbox.first.click()
@@ -381,8 +799,11 @@ class ThreadsUploader(BaseUploader):
 
 
 
-                final_action_labels = ["예약", "Schedule"] if scheduled_at else ["게시", "Post"]
-                if not self._click_threads_menu_item(page, final_action_labels):
+                if scheduled_at:
+                    final_clicked = self._click_threads_final_schedule(page)
+                else:
+                    final_clicked = self._click_threads_menu_item(page, ["게시", "Post"])
+                if not final_clicked:
                     self.logger.error(f"Threads 최종 [{action_name}] 버튼을 찾지 못했어요.")
                     browser.close()
                     return False
