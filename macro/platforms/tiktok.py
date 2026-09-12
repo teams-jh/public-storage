@@ -1,12 +1,10 @@
 import os
+import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from platforms.base import BaseUploader
 from platforms.scheduling import (
-    choose_calendar_date,
-    fill_labeled_time,
-    fill_native_date_time,
     get_scheduled_at,
 )
 from config import (
@@ -34,49 +32,323 @@ class TikTokUploader(BaseUploader):
             return False
 
         for surface in [page, *page.frames]:
-            labels = surface.locator(
-                "label:has-text('예약'), label:has-text('Schedule'), "
-                "div:text-is('예약 게시'), div:text-is('예약'), "
-                "div:text-is('Schedule video'), div:text-is('Schedule')"
-            )
-            toggle = None
-            for index in range(labels.count()):
-                label = labels.nth(index)
-                try:
-                    if not label.is_visible():
-                        continue
-                    candidate = label.locator(
-                        "xpath=following::*[@role='switch' or self::input[@type='checkbox']][1]"
-                    )
-                    if candidate.count() > 0:
-                        toggle = candidate.first
-                        break
-                except Exception:
-                    continue
-
-            if toggle is None:
+            if not self._select_tiktok_schedule_radio(surface):
                 continue
 
-            try:
-                checked = toggle.get_attribute("aria-checked")
-                if checked != "true" and not toggle.is_checked():
-                    toggle.click(force=True)
-            except Exception:
-                toggle.click(force=True)
             surface.wait_for_timeout(700)
+            if not self._allow_tiktok_schedule_storage(surface):
+                self.logger.error("TikTok 예약 동영상 저장 권한을 허용하지 못했어요.")
+                return False
 
-            if not fill_native_date_time(surface, scheduled_at):
-                date_set = choose_calendar_date(surface, scheduled_at)
-                time_set = fill_labeled_time(surface, scheduled_at)
-                if not date_set or not time_set:
-                    self.logger.error("TikTok 예약 날짜 또는 시간을 입력하지 못했어요. 즉시 게시하지 않고 중단해요.")
-                    return False
+            picker = self._get_visible_tiktok_schedule_picker(surface)
+            if picker is None:
+                self.logger.error("TikTok 예약 날짜·시간 선택 영역을 찾지 못했어요.")
+                return False
+
+            time_set = self._select_tiktok_schedule_time(surface, picker, scheduled_at)
+            date_set = self._select_tiktok_schedule_date(surface, picker, scheduled_at)
+            if not date_set or not time_set:
+                self.logger.error("TikTok 예약 날짜 또는 시간을 입력하지 못했어요. 즉시 게시하지 않고 중단해요.")
+                return False
 
             self.logger.info(f"TikTok 자체 예약 설정 완료: {scheduled_at:%Y-%m-%d %H:%M}")
             return True
 
-        self.logger.error("TikTok 예약 스위치를 찾지 못했어요. 계정의 예약 기능 지원 여부를 확인해 주세요.")
+        self.logger.error("TikTok [게시 시기 > 예약] 라디오 버튼을 찾지 못했어요.")
         return False
+
+    def _select_tiktok_schedule_radio(self, surface) -> bool:
+        """설정 아래의 게시 시기 영역에서 예약 라디오 버튼을 선택해요."""
+        try:
+            return surface.evaluate(r"""() => {
+                const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0 &&
+                        style.display !== 'none' && style.visibility !== 'hidden';
+                };
+                const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+                const all = Array.from(document.querySelectorAll(
+                    'div, span, label, button, input, [role="radio"]'
+                ));
+                const heading = all.find(element =>
+                    ['게시 시기', 'When to post'].includes(normalize(element.textContent)) && visible(element)
+                );
+                if (!heading) return false;
+
+                let section = heading.parentElement;
+                while (section && section !== document.body) {
+                    const text = normalize(section.textContent);
+                    if ((text.includes('예약') || text.includes('Schedule')) && visible(section)) break;
+                    section = section.parentElement;
+                }
+                if (!section || section === document.body) return false;
+
+                const candidates = Array.from(section.querySelectorAll(
+                    'input[type="radio"], [role="radio"], label, button, div, span'
+                )).filter(element => {
+                    const text = normalize(element.textContent);
+                    const value = normalize(element.value);
+                    return visible(element) && (
+                        text === '예약' || text === 'Schedule' ||
+                        value === '예약' || value.toLowerCase() === 'schedule'
+                    );
+                });
+                const matches = candidates.map(element => {
+                    const clickable = element.matches('input[type="radio"], [role="radio"]')
+                        ? element
+                        : element.closest('label, button, [role="radio"], [role="button"], [tabindex="0"]') || element;
+                    const rect = clickable.getBoundingClientRect();
+                    return { clickable, area: rect.width * rect.height };
+                }).filter(item => item.area > 0).sort((a, b) => a.area - b.area);
+                if (matches.length === 0) return false;
+                matches[0].clickable.click();
+                return true;
+            }""")
+        except Exception:
+            return False
+
+    def _allow_tiktok_schedule_storage(self, surface) -> bool:
+        """예약 동영상을 TikTok 서버에 저장하는 권한 팝업을 허용해요."""
+        for _ in range(12):
+            try:
+                result = surface.evaluate(r"""() => {
+                    const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0 &&
+                            style.display !== 'none' && style.visibility !== 'hidden';
+                    };
+                    const dialogs = Array.from(document.querySelectorAll(
+                        '[role="dialog"], [class*="modal" i], [class*="popup" i]'
+                    )).filter(visible);
+                    const permission = dialogs.find(dialog => {
+                        const text = dialog.textContent || '';
+                        return text.includes('예약 게시를 위해 동영상을 저장하도록 허용할까요?') ||
+                            text.includes('Allow TikTok to save your video for scheduled posting');
+                    });
+                    if (!permission) return 'not-found';
+                    const buttons = Array.from(permission.querySelectorAll(
+                        'button, [role="button"], [tabindex="0"]'
+                    )).filter(visible);
+                    const allow = buttons.find(button => {
+                        const text = (button.textContent || '').replace(/\s+/g, ' ').trim();
+                        return text === '허용' || text === 'Allow';
+                    });
+                    if (!allow) return 'button-missing';
+                    allow.click();
+                    return 'clicked';
+                }""")
+                if result == "clicked":
+                    surface.wait_for_timeout(500)
+                    self.logger.info("TikTok 예약 동영상 저장 [허용]을 선택했어요.")
+                    return True
+                if result == "button-missing":
+                    return False
+            except Exception:
+                pass
+            surface.wait_for_timeout(250)
+
+        # 이미 권한을 허용한 계정은 팝업이 다시 나타나지 않을 수 있어요.
+        return self._get_visible_tiktok_schedule_picker(surface) is not None
+
+    @staticmethod
+    def _get_visible_tiktok_schedule_picker(surface):
+        """화면에 보이는 TikTok scheduled-picker를 찾아요."""
+        pickers = surface.locator("div.scheduled-picker, div[class*='scheduled-picker']")
+        for index in range(pickers.count() - 1, -1, -1):
+            picker = pickers.nth(index)
+            try:
+                if picker.is_visible():
+                    return picker
+            except Exception:
+                continue
+        return None
+
+    def _select_tiktok_schedule_time(self, surface, picker, scheduled_at: datetime) -> bool:
+        """TikTok의 24시간제 시·분 목록에서 예약 시간을 선택해요."""
+        time_input = None
+        inputs = picker.locator("input[readonly]")
+        for index in range(inputs.count()):
+            candidate = inputs.nth(index)
+            try:
+                if candidate.is_visible() and re.fullmatch(r"\d{1,2}:\d{2}", candidate.input_value()):
+                    time_input = candidate
+                    break
+            except Exception:
+                continue
+        if time_input is None:
+            return False
+
+        hour_text = f"{scheduled_at.hour:02d}"
+        minute_text = f"{scheduled_at.minute:02d}"
+        try:
+            time_input.click(force=True)
+            surface.wait_for_timeout(300)
+            visible_picker = None
+            time_pickers = surface.locator(
+                ".tiktok-timepicker-time-picker-container:not(.tiktok-timepicker-invisible)"
+            )
+            for index in range(time_pickers.count() - 1, -1, -1):
+                candidate = time_pickers.nth(index)
+                if candidate.is_visible():
+                    visible_picker = candidate
+                    break
+            if visible_picker is None:
+                return False
+
+            hour = visible_picker.locator(
+                f".tiktok-timepicker-option-text.tiktok-timepicker-left:text-is('{hour_text}')"
+            )
+            minute = visible_picker.locator(
+                f".tiktok-timepicker-option-text.tiktok-timepicker-right:text-is('{minute_text}')"
+            )
+            if hour.count() == 0 or minute.count() == 0:
+                self.logger.error(
+                    f"TikTok 시간 목록에서 {hour_text}:{minute_text}을 찾지 못했어요. "
+                    "분은 5분 단위로 입력해 주세요."
+                )
+                return False
+            hour.first.scroll_into_view_if_needed()
+            hour.first.click(force=True)
+            minute.first.scroll_into_view_if_needed()
+            minute.first.click(force=True)
+            surface.wait_for_timeout(400)
+            if time_input.input_value() != f"{hour_text}:{minute_text}":
+                return False
+            self.logger.info(f"TikTok 예약 시간 선택 완료: {hour_text}:{minute_text}")
+            return True
+        except Exception:
+            return False
+
+    def _select_tiktok_schedule_date(self, surface, picker, scheduled_at: datetime) -> bool:
+        """TikTok 날짜 입력을 열고 달력에서 예약일을 선택해요."""
+        expected_value = scheduled_at.strftime("%Y-%m-%d")
+        date_input = None
+        inputs = picker.locator("input[readonly]")
+        for index in range(inputs.count()):
+            candidate = inputs.nth(index)
+            try:
+                if candidate.is_visible() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", candidate.input_value()):
+                    date_input = candidate
+                    break
+            except Exception:
+                continue
+        if date_input is None:
+            return False
+
+        try:
+            date_input.click(force=True)
+            surface.wait_for_timeout(300)
+            date_set = self._select_tiktok_calendar_day(surface, scheduled_at)
+            surface.wait_for_timeout(400)
+            if not date_set or date_input.input_value() != expected_value:
+                return False
+            self.logger.info(f"TikTok 예약 날짜 선택 완료: {expected_value}")
+            return True
+        except Exception:
+            return False
+
+    def _select_tiktok_calendar_day(self, surface, scheduled_at: datetime) -> bool:
+        """TikTok 전용 달력에서 현재 월의 정확한 날짜 칸을 선택해요."""
+        calendars = surface.locator("div.calendar-wrapper")
+        calendar = None
+        for index in range(calendars.count() - 1, -1, -1):
+            candidate = calendars.nth(index)
+            try:
+                if candidate.is_visible():
+                    calendar = candidate
+                    break
+            except Exception:
+                continue
+        if calendar is None:
+            self.logger.error("TikTok 달력 팝업을 찾지 못했어요.")
+            return False
+
+        displayed_month = self._get_tiktok_calendar_month(calendar)
+        if displayed_month is None:
+            self.logger.error("TikTok 달력의 표시 연월을 읽지 못했어요.")
+            return False
+
+        displayed_year, displayed_month_number = displayed_month
+        month_steps = (
+            (scheduled_at.year - displayed_year) * 12
+            + scheduled_at.month
+            - displayed_month_number
+        )
+        direction = 1 if month_steps >= 0 else -1
+        displayed_month_index = displayed_year * 12 + displayed_month_number - 1
+        for step in range(abs(month_steps)):
+            arrows = calendar.locator("span.arrow")
+            if arrows.count() < 2:
+                self.logger.error("TikTok 달력의 월 이동 화살표를 찾지 못했어요.")
+                return False
+            arrow = arrows.last if direction > 0 else arrows.first
+            try:
+                arrow.scroll_into_view_if_needed()
+                arrow.click(force=True)
+            except Exception:
+                return False
+
+            expected_month_index = displayed_month_index + direction * (step + 1)
+            expected_year, zero_based_month = divmod(expected_month_index, 12)
+            expected_month = zero_based_month + 1
+            month_changed = False
+            for _ in range(10):
+                surface.wait_for_timeout(200)
+                if self._get_tiktok_calendar_month(calendar) == (
+                    expected_year,
+                    expected_month,
+                ):
+                    month_changed = True
+                    break
+            if not month_changed:
+                self.logger.error(
+                    f"TikTok 달력이 {expected_year}년 {expected_month}월로 바뀌지 않았어요."
+                )
+                return False
+
+        if self._get_tiktok_calendar_month(calendar) != (
+            scheduled_at.year,
+            scheduled_at.month,
+        ):
+            return False
+
+        # 일요일부터 시작하는 7열 달력에서 목표 날짜의 정확한 칸을 계산해요.
+        first_day = datetime(scheduled_at.year, scheduled_at.month, 1)
+        sunday_based_offset = (first_day.weekday() + 1) % 7
+        cell_index = sunday_based_offset + scheduled_at.day - 1
+        day_cells = calendar.locator("span.day")
+        if cell_index >= day_cells.count():
+            return False
+        target_day = day_cells.nth(cell_index)
+        try:
+            class_name = target_day.get_attribute("class") or ""
+            if not target_day.is_visible() or "valid" not in class_name.split():
+                self.logger.error(f"TikTok에서 선택할 수 없는 날짜예요: {scheduled_at:%Y-%m-%d}")
+                return False
+            if target_day.inner_text().strip() != str(scheduled_at.day):
+                return False
+            target_day.scroll_into_view_if_needed()
+            target_day.click(force=True)
+            surface.wait_for_timeout(300)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _get_tiktok_calendar_month(calendar):
+        """TikTok 달력의 분리된 월·연도 제목을 읽어요."""
+        try:
+            month_text = calendar.locator("span.month-title").inner_text().strip()
+            year_text = calendar.locator("span.year-title").inner_text().strip()
+            month_match = re.search(r"\d{1,2}", month_text)
+            year_match = re.search(r"\d{4}", year_text)
+            if not month_match or not year_match:
+                return None
+            return int(year_match.group()), int(month_match.group())
+        except Exception:
+            return None
 
     def upload(self, media_path: Path, metadata: dict) -> bool:
         """
@@ -424,16 +696,26 @@ class TikTokUploader(BaseUploader):
 
                 # 게시(Post) 버튼 정확히 찾기
                 post_btn = None
-                selectors = [
-                    "div[class*='btn-post'] button",
-                    "div[class*='button-group'] button:has-text('게시')",
-                    "button[class*='primary']:has-text('게시')",
-                    "button[class*='TuxButton--primary']",
-                    "button:text-is('게시')",
-                    "button:text-is('Post')",
-                    "button:has-text('게시')",
-                    "button:has-text('Post')",
-                ]
+                if scheduled_at:
+                    selectors = [
+                        "button[data-e2e='post_video_button']:has-text('예약')",
+                        "button[data-e2e='post_video_button']:has-text('Schedule')",
+                        "button:has(div.Button__content:text-is('예약'))",
+                        "button:has(div.Button__content:text-is('Schedule'))",
+                        "button:text-is('예약')",
+                        "button:text-is('Schedule')",
+                    ]
+                else:
+                    selectors = [
+                        "div[class*='btn-post'] button",
+                        "div[class*='button-group'] button:has-text('게시')",
+                        "button[class*='primary']:has-text('게시')",
+                        "button[class*='TuxButton--primary']",
+                        "button:text-is('게시')",
+                        "button:text-is('Post')",
+                        "button:has-text('게시')",
+                        "button:has-text('Post')",
+                    ]
 
                 for sel in selectors:
                     btns = page.locator(sel)
@@ -475,7 +757,7 @@ class TikTokUploader(BaseUploader):
                     action_name = "예약" if scheduled_at else "게시"
                     self.logger.info(f"하단 [{action_name}] 버튼 클릭 시도...")
                     post_btn.click(force=True)
-                    self.logger.info(f"게시 버튼을 클릭했습니다. 서버 처리 및 완료 대기 중 (최대 {upload_timeout}초)...")
+                    self.logger.info(f"{action_name} 버튼을 클릭했어요. 서버 처리 및 완료 대기 중 (최대 {upload_timeout}초)...")
 
                     # 게시 완료 상태 확인 대기 (최대 upload_timeout초)
                     post_completed = False
