@@ -52,11 +52,14 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
         trigger_candidates = page.locator(
             "div[role='button'][aria-haspopup='dialog'][aria-expanded][tabindex='0'], "
             "button[aria-label*='날짜'], button[aria-label*='date' i], "
-            "div[role='button'][aria-label*='날짜'], div[role='button'][aria-label*='date' i]"
+            "div[role='button'][aria-label*='날짜'], div[role='button'][aria-label*='date' i], "
+            "ytcp-datetime-picker #datepicker-trigger, "
+            "ytcp-datetime-picker #datepicker-trigger ytcp-dropdown-trigger[role='button']"
         )
         date_trigger = None
         date_text_pattern = re.compile(
-            r"(?:\d{4}년\s*\d{1,2}월\s*\d{1,2}일|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{4})"
+            r"(?:\d{4}년\s*\d{1,2}월\s*\d{1,2}일|\d{4}-\d{1,2}-\d{1,2}|"
+            r"\d{1,2}/\d{1,2}/\d{4}|\d{4}\.\s*\d{1,2}\.\s*\d{1,2}\.)"
         )
 
         for index in range(trigger_candidates.count()):
@@ -152,6 +155,7 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
             };
             const monthLabels = [
                 `${target.year}년 ${target.month}월`,
+                `${target.month}월 ${target.year}`,
                 `${target.year}-${String(target.month).padStart(2, '0')}`,
             ];
             const allElements = Array.from(document.querySelectorAll("div, span, button"));
@@ -172,6 +176,22 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
                 calendar = calendar.parentElement;
             }
             if (!calendar || calendar === document.body) return false;
+
+            const isoDate = `${target.year}-${String(target.month).padStart(2, '0')}-${String(target.day).padStart(2, '0')}`;
+            const fullDateControls = Array.from(calendar.querySelectorAll("button, [role='button'], [role='gridcell'], [aria-label], [data-date], [datetime]"))
+                .filter(element => {
+                    if (!isVisible(element)) return false;
+                    const aria = element.getAttribute('aria-label') || '';
+                    const dataDate = element.getAttribute('data-date') || '';
+                    const dateTime = element.getAttribute('datetime') || '';
+                    const koreanDate = `${target.year}년 ${target.month}월 ${target.day}일`;
+                    return aria.includes(koreanDate) || dataDate === isoDate || dateTime.startsWith(isoDate);
+                });
+            if (fullDateControls.length > 0) {
+                const clickable = fullDateControls[0].closest("button, [role='button'], [tabindex='0']") || fullDateControls[0];
+                clickable.click();
+                return true;
+            }
 
             const matches = Array.from(calendar.querySelectorAll("button, [role='button'], [tabindex], div, span"))
                 .filter(element => {
@@ -200,6 +220,9 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
         pass
 
     day_candidates = page.locator(
+        f"ytcp-date-picker button:text-is('{day_text}'), "
+        f"ytcp-date-picker [role='button']:text-is('{day_text}'), "
+        f"ytcp-date-picker [role='gridcell']:text-is('{day_text}'), "
         f"div[role='dialog'] button:text-is('{day_text}'), "
         f"div[role='dialog'] div[role='button']:text-is('{day_text}'), "
         f"div[role='dialog'] [role='gridcell']:text-is('{day_text}'), "
