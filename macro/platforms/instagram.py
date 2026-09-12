@@ -7,7 +7,7 @@ from platforms.scheduling import (
     get_scheduled_at,
 )
 from config import (
-    CONFIG, DISABLE_AUTO_LOGIN, FORCE_BROWSER_UPLOAD, INSTAGRAM_SCHEDULE_MAX_DAYS, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
+    CONFIG, DISABLE_AUTO_LOGIN, FORCE_BROWSER_UPLOAD, INSTAGRAM_AI_LABEL_ENABLED, INSTAGRAM_SCHEDULE_MAX_DAYS, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
     get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
 )
 
@@ -16,6 +16,96 @@ class InstagramUploader(BaseUploader):
         super().__init__("Instagram")
         self.username = CONFIG.get("INSTAGRAM_USERNAME")
         self.password = CONFIG.get("INSTAGRAM_PASSWORD")
+
+    def _enable_ai_label(self, page) -> bool:
+        """캡션 화면의 AI 레이블 추가 토글을 OFF일 때만 켭니다."""
+        labels = page.locator(
+            "div[role='dialog'] div:text-is('AI 레이블 추가'), "
+            "div[role='dialog'] span:text-is('AI 레이블 추가'), "
+            "div[role='dialog'] div:text-is('Add AI label'), "
+            "div[role='dialog'] span:text-is('Add AI label')"
+        )
+        for label_index in range(labels.count() - 1, -1, -1):
+            label = labels.nth(label_index)
+            try:
+                if not label.is_visible():
+                    continue
+                row = label.locator(
+                    "xpath=ancestor::div[.//*[@role='switch'] or .//input[@type='checkbox'] or .//*[@aria-checked]][1]"
+                )
+                if row.count() == 0:
+                    continue
+                controls = row.locator(
+                    "[role='switch'], input[type='checkbox'], [aria-checked]"
+                )
+                for control_index in range(controls.count() - 1, -1, -1):
+                    control = controls.nth(control_index)
+                    if not control.is_visible():
+                        continue
+
+                    input_type = (control.get_attribute("type") or "").lower()
+                    if input_type == "checkbox":
+                        is_on = control.is_checked()
+                    else:
+                        is_on = control.get_attribute("aria-checked") == "true"
+
+                    if is_on:
+                        self.logger.info("Instagram [AI 레이블 추가] 토글이 이미 ON이에요.")
+                        return True
+
+                    control.scroll_into_view_if_needed()
+                    control.click(force=True)
+                    page.wait_for_timeout(700)
+
+                    if input_type == "checkbox":
+                        is_on = control.is_checked()
+                    else:
+                        is_on = control.get_attribute("aria-checked") == "true"
+                    if is_on:
+                        self.logger.info("Instagram [AI 레이블 추가] 토글 ON 완료")
+                        return True
+            except Exception:
+                continue
+
+        # 접근성 속성이 없는 UI 버전은 레이블 행 오른쪽의 토글 좌표를 직접 눌러요.
+        try:
+            clicked = page.evaluate("""() => {
+                const isVisible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0
+                        && style.display !== 'none' && style.visibility !== 'hidden';
+                };
+                const labels = Array.from(document.querySelectorAll('div[role="dialog"] div, div[role="dialog"] span'))
+                    .filter(element => ['AI 레이블 추가', 'Add AI label'].includes((element.textContent || '').trim()) && isVisible(element));
+                for (const label of labels) {
+                    const labelRect = label.getBoundingClientRect();
+                    let row = label.parentElement;
+                    for (let depth = 0; row && depth < 6; depth += 1, row = row.parentElement) {
+                        const candidates = Array.from(row.querySelectorAll('button, [role="button"], [tabindex="0"]'))
+                            .filter(element => {
+                                if (!isVisible(element)) return false;
+                                const rect = element.getBoundingClientRect();
+                                return rect.left > labelRect.right && rect.width >= 30 && rect.width <= 90
+                                    && rect.height >= 16 && rect.height <= 50;
+                            });
+                        if (candidates.length > 0) {
+                            candidates.at(-1).click();
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }""")
+            if clicked:
+                page.wait_for_timeout(700)
+                self.logger.info("Instagram [AI 레이블 추가] 토글 좌표 클릭 완료")
+                return True
+        except Exception:
+            pass
+
+        self.logger.error("Instagram [AI 레이블 추가] 토글을 켜지 못했어요.")
+        return False
 
     def _open_create_post_dialog(self, page, create_target) -> bool:
         """만들기 메뉴에서 게시물을 선택하고 파일 업로드 모달이 열릴 때까지 기다립니다."""
@@ -297,8 +387,13 @@ class InstagramUploader(BaseUploader):
         self.logger.info(f"캡션 내용 요약:\n{caption[:100]}...")
 
         # 예약 게시에는 Instagram 자체 예약 UI가 필요하므로 모바일 API를 사용하지 않습니다.
-        if scheduled_at or FORCE_BROWSER_UPLOAD:
-            reason = "자체 콘텐츠 예약" if scheduled_at else "별도 계정 브라우저 프로필"
+        if scheduled_at or FORCE_BROWSER_UPLOAD or INSTAGRAM_AI_LABEL_ENABLED:
+            if scheduled_at:
+                reason = "자체 콘텐츠 예약"
+            elif FORCE_BROWSER_UPLOAD:
+                reason = "별도 계정 브라우저 프로필"
+            else:
+                reason = "AI 레이블 설정"
             self.logger.info(f"Instagram {reason}을 사용하기 위해 Playwright 모드로 진행해요.")
         else:
             # 방법 1: instagrapi 라이브러리 사용 (추천: 모바일 API)
@@ -695,6 +790,10 @@ class InstagramUploader(BaseUploader):
                             self.logger.warning(f"캡션 입력 중 오류: {e}")
                     else:
                         self.logger.warning("⚠️ 캡션 입력창(contenteditable)을 찾지 못했습니다.")
+
+                    if INSTAGRAM_AI_LABEL_ENABLED and not self._enable_ai_label(page):
+                        browser.close()
+                        return False
 
                     if scheduled_at and not self._configure_native_schedule(page, scheduled_at):
                         browser.close()

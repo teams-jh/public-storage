@@ -50,6 +50,10 @@ TIKTOK_SCHEDULE_MIN_MINUTES = 15
 # 이 값보다 먼 시각은 TikTok에서 예약할 수 없어 즉시 게시 방지를 위해 실패 처리합니다.
 TIKTOK_SCHEDULE_MAX_DAYS = 10
 
+# Instagram 게시물 작성 시 AI 생성 콘텐츠 레이블을 항상 활성화합니다.
+# 웹 작성 화면에서만 토글 상태를 검증할 수 있으므로 True이면 브라우저 업로드를 사용합니다.
+INSTAGRAM_AI_LABEL_ENABLED = True
+
 
 def parse_scheduled_time(value: str) -> datetime | None:
     """[TIME] 값을 로컬 datetime으로 변환합니다. 빈 값은 None을 반환합니다."""
