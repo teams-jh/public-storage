@@ -469,6 +469,7 @@ class TikTokUploader(BaseUploader):
 
                 file_input = None
                 for attempt in range(36):  # 5초씩 36회 = 180초 대기
+                    self.log_wait_progress("TikTok 로그인·업로드 준비 대기", attempt * 5, 180)
                     # 1) 사진 모드일 경우 주기적으로 탭 전환 재확인
                     if media_type != "video" and attempt % 3 == 0:
                         self._ensure_photo_tab(page)
@@ -530,7 +531,10 @@ class TikTokUploader(BaseUploader):
 
                 # 영상/사진 업로드 완료 및 세부정보 화면 전환 대기 (최대 upload_timeout초)
                 self.logger.info(f"미디어 파일 업로드 및 세부정보 화면 진입 대기 중 (최대 {upload_timeout}초)...")
-                for _ in range(upload_timeout // 2):
+                for wait_i in range(upload_timeout // 2):
+                    self.log_wait_progress(
+                        "TikTok 미디어 업로드 처리", wait_i * 2, upload_timeout
+                    )
                     page.wait_for_timeout(2000)
                     is_loaded = (
                         "photo" in page.url
@@ -746,7 +750,8 @@ class TikTokUploader(BaseUploader):
                     page.wait_for_timeout(1000)
 
                     # 비활성화 상태가 풀릴 때까지 대기
-                    for _ in range(30):
+                    for wait_i in range(30):
+                        self.log_wait_progress("TikTok 게시 버튼 활성화 대기", wait_i, 30)
                         try:
                             if post_btn.is_enabled():
                                 break
@@ -762,6 +767,9 @@ class TikTokUploader(BaseUploader):
                     # 게시 완료 상태 확인 대기 (최대 upload_timeout초)
                     post_completed = False
                     for wait_i in range(upload_timeout):
+                        self.log_wait_progress(
+                            "TikTok 게시 완료 확인", wait_i, upload_timeout
+                        )
                         page.wait_for_timeout(1000)
 
                         # 1) '계속 게시할까요?' / '잠재적 문제에 대한 검사' 팝업 감지 시 [지금 게시] 자동 클릭
@@ -866,9 +874,13 @@ class TikTokUploader(BaseUploader):
                             break
 
                     if post_completed:
-                        self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
-                        page.wait_for_timeout(sync_buffer * 1000)
+                        self.wait_with_countdown(
+                            page, sync_buffer, "TikTok 업로드 세션 안전 동기화"
+                        )
                         self.logger.info("🎉 TikTok 최종 업로드 성공 완료!")
+                        self.save_result_screenshot(
+                            page, "scheduled" if scheduled_at else "uploaded"
+                        )
                         browser.close()
                         return True
                     else:

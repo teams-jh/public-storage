@@ -472,7 +472,10 @@ class YouTubeUploader(BaseUploader):
 
                     # 유튜브 하단 서버 업로드 완료율 대기 (0% -> 100% / 업로드 완료 / 처리 중)
                     self.logger.info("YouTube 서버로 동영상 파일 전송 완료 대기 중...")
-                    for _ in range(upload_timeout // 3):
+                    for wait_i in range(upload_timeout // 3):
+                        self.log_wait_progress(
+                            "YouTube 동영상 업로드·인코딩", wait_i * 3, upload_timeout
+                        )
                         page.wait_for_timeout(3000)
                         upload_status = page.locator("span.progress-label, div.progress-label, span:has-text('업로드 완료'), span:has-text('처리 완료'), span:has-text('검사 완료')")
                         if upload_status.count() > 0:
@@ -524,7 +527,10 @@ class YouTubeUploader(BaseUploader):
                             else done_host
                         )
                         button_ready = False
-                        for _ in range(30):
+                        for wait_i in range(30):
+                            self.log_wait_progress(
+                                "YouTube 게시 버튼 활성화 대기", wait_i, 30
+                            )
                             try:
                                 if (
                                     click_target.is_enabled()
@@ -573,7 +579,10 @@ class YouTubeUploader(BaseUploader):
 
                     # 업로드 완료 및 링크 생성 확인 대기 (최대 upload_timeout초)
                     yt_done = False
-                    for _ in range(upload_timeout):
+                    for wait_i in range(upload_timeout):
+                        self.log_wait_progress(
+                            "YouTube 서버 처리 완료 확인", wait_i, upload_timeout
+                        )
                         page.wait_for_timeout(1000)
                         # 완료 다이얼로그에 유튜브 링크 또는 닫기 버튼이 생성된 경우
                         yt_link = page.locator("a[href*='youtu.be'], a.ytcp-video-info")
@@ -594,10 +603,14 @@ class YouTubeUploader(BaseUploader):
                             browser.close()
                             return False
                         # 백그라운드 전송 유실 방지를 위한 파일 크기 비례 안전 대기
-                        self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
-                        page.wait_for_timeout(sync_buffer * 1000)
+                        self.wait_with_countdown(
+                            page, sync_buffer, "YouTube 업로드 세션 안전 동기화"
+                        )
                         result_name = "예약 업로드" if scheduled_at else "업로드"
                         self.logger.info(f"🎉 YouTube 최종 {result_name} 완료!")
+                        self.save_result_screenshot(
+                            page, "scheduled" if scheduled_at else "uploaded"
+                        )
                         browser.close()
                         return True
                     else:

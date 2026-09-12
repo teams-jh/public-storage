@@ -387,6 +387,7 @@ class InstagramUploader(BaseUploader):
 
                 logged_in = False
                 for attempt in range(36):  # 5초 * 36 = 180초
+                    self.log_wait_progress("Instagram 로그인 대기", attempt * 5, 180)
                     # '나중에 하기' / 'Not Now' 팝업 자동 클릭
                     try:
                         not_now = page.locator("button:has-text('나중에 하기'), button:has-text('Not Now'), button:has-text('나중에')")
@@ -712,6 +713,9 @@ class InstagramUploader(BaseUploader):
                     self.logger.info(f"모달 내부에서 실제 업로드 완료 화면을 대기합니다 (최대 {upload_timeout}초 = {upload_timeout // 60}분)...")
                     
                     for wait_i in range(upload_timeout):
+                        self.log_wait_progress(
+                            "Instagram 업로드 완료 확인", wait_i, upload_timeout
+                        )
                         page.wait_for_timeout(1000)
                         
                         # 업로드 모달(div[role='dialog']) 내부의 텍스트만 엄격하게 검사
@@ -761,9 +765,13 @@ class InstagramUploader(BaseUploader):
                             self._click_final_post_action(page, scheduled=bool(scheduled_at))
 
                     if upload_success:
-                        self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
-                        page.wait_for_timeout(sync_buffer * 1000)
+                        self.wait_with_countdown(
+                            page, sync_buffer, "Instagram 업로드 세션 안전 동기화"
+                        )
                         self.logger.info("🎉 Instagram 업로드 최종 성공 완료!")
+                        self.save_result_screenshot(
+                            page, "scheduled" if scheduled_at else "uploaded"
+                        )
                         browser.close()
                         return True
                     else:

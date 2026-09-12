@@ -693,6 +693,9 @@ class ThreadsUploader(BaseUploader):
                 logged_in = False
                 
                 for attempt in range(LOGIN_TIMEOUT_SECONDS // 5):  # 5초 * 36회 = 180초
+                    self.log_wait_progress(
+                        "Threads 로그인 대기", attempt * 5, LOGIN_TIMEOUT_SECONDS
+                    )
                     # 1) 비로그인 상태 신호 확인 (로그인 버튼, Instagram으로 로그인 등)
                     login_prompts = page.locator(
                         "a[href*='/login'], "
@@ -751,8 +754,9 @@ class ThreadsUploader(BaseUploader):
                         file_input.first.set_input_files(str(media_path.resolve()))
                         # 미디어 처리 대기
                         render_wait = max(5, int(size_mb * 1.5)) if media_type == "video" else 3
-                        self.logger.info(f"미디어 파일 렌더링 대기 중 ({render_wait}초)...")
-                        page.wait_for_timeout(render_wait * 1000)
+                        self.wait_with_countdown(
+                            page, render_wait, "Threads 미디어 파일 렌더링"
+                        )
                     except Exception as e:
                         self.logger.warning(f"파일 첨부 실패: {e}")
 
@@ -866,6 +870,9 @@ class ThreadsUploader(BaseUploader):
                 # 게시 완료 상태 확인 (최대 upload_timeout초)
                 post_done = False
                 for wait_i in range(upload_timeout):
+                    self.log_wait_progress(
+                        "Threads 게시 완료 확인", wait_i, upload_timeout
+                    )
                     page.wait_for_timeout(1000)
                     
                     # 1) '게시되었습니다' 토스트 확인
@@ -910,10 +917,14 @@ class ThreadsUploader(BaseUploader):
 
                 if post_done:
                     # 미디어 크기에 비례하여 넉넉하게 세션 유지 후 정상 종료 (사진 20초, 동영상 30~180초)
-                    self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
-                    page.wait_for_timeout(sync_buffer * 1000)
+                    self.wait_with_countdown(
+                        page, sync_buffer, "Threads 업로드 세션 안전 동기화"
+                    )
                     result_name = "예약 등록" if scheduled_at else "업로드"
                     self.logger.info(f"🎉 Threads 최종 {result_name} 완료!")
+                    self.save_result_screenshot(
+                        page, "scheduled" if scheduled_at else "uploaded"
+                    )
                     browser.close()
                     return True
                 else:

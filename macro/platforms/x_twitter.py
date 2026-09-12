@@ -354,6 +354,7 @@ class TwitterXUploader(BaseUploader):
                 self.logger.info("X(Twitter) 로그인 상태 확인 중...")
                 logged_in = False
                 for attempt in range(36):  # 5초 * 36 = 180초
+                    self.log_wait_progress("X 로그인 대기", attempt * 5, 180)
                     # 로그인 완료 지표 확인 (트윗 입력창, 새 트윗 버튼, 사이드바 링크, 계정 스위처 등)
                     login_indicators = page.locator(
                         "div[data-testid='tweetTextarea_0'], "
@@ -424,7 +425,10 @@ class TwitterXUploader(BaseUploader):
                     
                     # 미디어 처리 및 프리뷰 렌더링 대기 (대용량 동영상 고려: 최대 upload_timeout초)
                     self.logger.info(f"미디어 파일 처리 및 렌더링 대기 중 (최대 {upload_timeout}초)...")
-                    for _ in range(upload_timeout // 2):
+                    for wait_i in range(upload_timeout // 2):
+                        self.log_wait_progress(
+                            "X 미디어 처리·렌더링", wait_i * 2, upload_timeout
+                        )
                         page.wait_for_timeout(2000)
                         has_attachment = page.locator(
                             "div[data-testid='attachments'], "
@@ -490,7 +494,8 @@ class TwitterXUploader(BaseUploader):
                     target_btn = post_btn.last
                     # 비활성화 해제 대기 (최대 30초)
                     button_ready = False
-                    for _ in range(30):
+                    for wait_i in range(30):
+                        self.log_wait_progress("X 최종 버튼 활성화 대기", wait_i, 30)
                         try:
                             aria_disabled = target_btn.get_attribute("aria-disabled")
                             if target_btn.is_enabled() and aria_disabled != "true":
@@ -608,7 +613,10 @@ class TwitterXUploader(BaseUploader):
                     
                     # 완료 대기 (모달 닫힘 또는 토스트 메시지 감지, 최대 upload_timeout초)
                     tweet_sent = False
-                    for _ in range(upload_timeout):
+                    for wait_i in range(upload_timeout):
+                        self.log_wait_progress(
+                            "X 게시 완료 확인", wait_i, upload_timeout
+                        )
                         page.wait_for_timeout(1000)
                         toast = page.locator("div[data-testid='toast']")
                         if toast.count() > 0 and toast.first.is_visible():
@@ -624,10 +632,14 @@ class TwitterXUploader(BaseUploader):
                             break
 
                     if tweet_sent:
-                        self.logger.info(f"업로드 세션 안전 동기화 중 ({sync_buffer}초간 넉넉하게 대기)...")
-                        page.wait_for_timeout(sync_buffer * 1000)
+                        self.wait_with_countdown(
+                            page, sync_buffer, "X 업로드 세션 안전 동기화"
+                        )
                         result_name = "예약 등록" if scheduled_at else "업로드"
                         self.logger.info(f"🎉 X(Twitter) {result_name} 최종 완료!")
+                        self.save_result_screenshot(
+                            page, "scheduled" if scheduled_at else "uploaded"
+                        )
                         browser.close()
                         return True
                     else:
