@@ -1,5 +1,3 @@
-﻿import aitConfig from "../../apps-in-toss.config.ts";
-
 /**
  * ============================================================================
  * [GLOBAL CONSTANTS] 전역 상수 및 설정 관리 파일 (public-storage)
@@ -12,8 +10,8 @@
 // 1. 광고(Ad) 관련 상수 및 설정
 // ============================================================================
 
-/** apps-in-toss.config.ts에서 가져온 현재 앱 이름 */
-export const CURRENT_APP_NAME: string = aitConfig.appName || "public-storage";
+/** 앱 전체에서 사용하는 식별 이름. 변경하면 광고 및 앱 설정에서 참조하는 이름이 함께 바뀌어요. */
+export const CURRENT_APP_NAME = "lotto-viewer-mobile";
 
 /** 원격 광고 데이터 JSON URL */
 export const NEW_ADS_INFO_URL =
