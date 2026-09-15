@@ -1,4 +1,4 @@
-﻿import aitConfig from "apps-in-toss.config";
+﻿import aitConfig from "../../apps-in-toss.config.ts";
 
 /**
  * ============================================================================
@@ -96,3 +96,30 @@ export const STORAGE_KEYS = {
   /** 앱 설정 저장 키 */
   USER_SETTINGS: "public-storage_user_settings",
 } as const;
+
+// ============================================================================
+// 5. 로또 당첨 번호 자동 갱신 설정
+// ============================================================================
+
+/** 동행복권 로또 6/45 회차 조회 API 주소. 변경하면 자동 갱신 데이터의 출처가 바뀌어요. */
+export const LOTTO_RESULT_API_URL =
+  "https://www.dhlottery.co.kr/lt645/selectPstLt645InfoNew.do";
+
+/** 전체 로또 데이터 파일의 저장소 루트 기준 경로. 변경하면 갱신 대상 파일이 바뀌어요. */
+export const LOTTO_NUMBER_JSON_PATH = "json/lottoNumber.json";
+
+/** 간소화 로또 데이터 파일의 저장소 루트 기준 경로. 변경하면 앱이 읽는 갱신 대상이 바뀌어요. */
+export const COMPACT_LOTTO_NUMBER_JSON_PATH = "json/compactLottoNumber.json";
+
+/** 동행복권 API 요청 제한 시간(단위: ms). 늘리면 느린 응답을 더 오래 기다려요. */
+export const LOTTO_REQUEST_TIMEOUT_MS = 15_000;
+
+/** 동행복권 API 요청 실패 시 최대 재시도 횟수(단위: 횟수). 늘리면 일시 장애 복구 가능성과 실행 시간이 함께 늘어요. */
+export const LOTTO_REQUEST_MAX_RETRIES = 3;
+
+/** 동행복권 API 재시도 사이의 기본 대기 시간(단위: ms). 실제 대기 시간은 시도 횟수에 비례해 늘어나요. */
+export const LOTTO_REQUEST_RETRY_DELAY_MS = 1_000;
+
+/** 동행복권 API 요청에 사용하는 User-Agent 값. 변경하면 사이트에서 요청을 식별하는 방식이 달라질 수 있어요. */
+export const LOTTO_REQUEST_USER_AGENT =
+  "public-storage-lotto-updater/1.0 (+https://github.com/teams-jh/public-storage)";

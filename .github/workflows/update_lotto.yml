@@ -1,80 +1,51 @@
-name: Weekly Update Lotto
+name: Update lotto numbers
 
 on:
   schedule:
-    - cron: "15 11 * * 6"   # 20:15 KST
-    - cron: "30 11 * * 6"   # 20:30 KST
-    - cron: "45 11 * * 6"   # 20:45 KST
-    - cron: "0 12 * * 6"    # 21:00 KST
-    - cron: "15 12 * * 6"   # 21:15 KST
-    - cron: "30 12 * * 6"   # 21:30 KST
-    - cron: "45 12 * * 6"   # 21:45 KST
-    - cron: "0 13 * * 6"    # 22:00 KST
-    - cron: "30 13 * * 6"    # 22:30 KST    
-  workflow_dispatch: # 수동 실행도 가능하게 (선택)
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-lotto-numbers
+  cancel-in-progress: false
 
 jobs:
   update-lotto:
     runs-on: ubuntu-latest
-
-    env:
-      GH_TOKEN: ${{ secrets.MY_TOKEN }}
+    timeout-minutes: 10
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.MY_TOKEN }}
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set Up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
-    - name: Install Dependencies
-      run: |
-        npm install axios --legacy-peer-deps
-        npm install @octokit/rest@20.0.2 --legacy-peer-deps
-        npm install node-fetch@2 --legacy-peer-deps
+      - name: Fetch latest lotto numbers
+        run: npm run lotto:update
 
-    - name: Run Node.js Script
-      id: run_script
-      run: node server/weekly_lotto_action.js
+      - name: Check for updated data
+        id: changes
+        shell: bash
+        run: |
+          if git diff --quiet -- json/lottoNumber.json json/compactLottoNumber.json; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          fi
 
-    - name: Update version.md with current date
-      if: steps.run_script.outputs.status == 'success'
-      run: |
-        TODAY=$(TZ=Asia/Seoul date +"%Y-%m-%d %H:%M:%S KST")
-        echo "Last Update: $TODAY" > version.md
-
-    - name: Sleep before commit & push
-      if: steps.run_script.outputs.status == 'success'
-      run: sleep 100
-
-    - name: Commit and Push changes
-      if: steps.run_script.outputs.status == 'success'
-      run: |
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-        # 혹시 모를 로컬 변경 초기화 (가장 중요!)
-        git reset --hard HEAD
-        git clean -fd
-
-        # 최신 리모트 내용 가져오기 (충돌 방지)
-        git pull --rebase origin main
-
-        # version.md 다시 반영
-        TODAY=$(TZ=Asia/Seoul date +"%Y-%m-%d %H:%M:%S KST")
-        echo "Last Update: $TODAY" > version.md
-
-        git add version.md
-
-        if ! git diff --cached --quiet; then
-          git commit -m "Update version.md on $TODAY"
-          git push https://x-access-token:${{ secrets.MY_TOKEN }}@github.com/${{ github.repository }}.git
-        else
-          echo "No changes to commit"
-        fi
-
-
+      - name: Commit and push updated data
+        if: steps.changes.outputs.updated == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add json/lottoNumber.json json/compactLottoNumber.json
+          git commit -m "chore: update lotto numbers"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

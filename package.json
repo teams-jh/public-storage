@@ -26,7 +26,9 @@
     "re:build-npm": "npm run clean && npm install && npm run build",
     "tsc:dev": "yarn dev & yarn tsc:watch",
     "tsc:watch": "tsc --noEmit --watch",
-    "tsc:print": "npx tsc --showConfig"
+    "tsc:print": "npx tsc --showConfig",
+    "lotto:update": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON server/update_lotto.ts",
+    "lotto:test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test server/update_lotto.test.ts"
   },
   "engines": {
     "node": ">=20"
