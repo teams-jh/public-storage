@@ -2,7 +2,8 @@ name: Update lotto numbers
 
 on:
   schedule:
-    - cron: "0 */2 * * *"
+    # GitHub Actions가 혼잡한 매시 정각을 피해 2시간마다 실행해요. (UTC 기준)
+    - cron: "17 */2 * * *"
   workflow_dispatch:
 
 permissions:
