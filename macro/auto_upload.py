@@ -173,7 +173,15 @@ def main():
     for plat, status in results.items():
         print(f" - {plat:12}: {status}")
     print("=" * 65)
-    print("작업이 완료되었습니다.\n")
+    print("작업이 완료되었어요.\n")
+
+    has_failure = any("실패" in str(status) for status in results.values())
+    if has_failure:
+        print("⚠️ 업로드 중 실패한 항목이 있어요. 화면의 에러 로그를 확인해 주세요.")
+        try:
+            input("👉 확인 후 프로그램을 종료하려면 [Enter] 키를 눌러주세요...")
+        except (EOFError, KeyboardInterrupt):
+            pass
 
 if __name__ == "__main__":
     main()
