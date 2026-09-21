@@ -1,0 +1,11 @@
+# Downloaded MP3 and temporary media files
+downloads/
+*.mp3
+*.m4a
+*.webm
+*.part
+*.ytdl
+
+# Python cache
+__pycache__/
+*.pyc
