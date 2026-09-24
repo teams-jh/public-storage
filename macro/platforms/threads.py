@@ -17,50 +17,107 @@ class ThreadsUploader(BaseUploader):
         self.access_token = CONFIG.get("META_ACCESS_TOKEN")
         self.threads_user_id = CONFIG.get("THREADS_USER_ID", "me")
 
-    def _configure_native_schedule(self, page, scheduled_at) -> bool:
+    def _configure_native_schedule(self, page, scheduled_at, composer=None) -> bool:
         """Threads 웹 작성 창의 자체 예약 기능을 설정합니다."""
-        more_icons = page.locator(
-            "svg[aria-label='더 보기'], "
-            "svg[aria-label='More'], "
-            "svg:has(title:text-is('더 보기')), "
-            "svg:has(title:text-is('More'))"
-        )
-        if more_icons.count() == 0:
-            self.logger.error("Threads [더 보기] 버튼을 찾지 못했어요. 즉시 게시하지 않고 중단해요.")
+        schedule_menu_labels = ["예약...", "예약…", "Schedule...", "Schedule…", "예약", "Schedule"]
+
+        trigger_selectors = [
+            "[aria-label='임시 저장본']",
+            "[aria-label='Drafts']",
+            "[aria-label='Draft']",
+            "[role='button'][aria-label*='임시 저장']",
+            "[role='button'][aria-label*='Draft' i], [role='button'][aria-label*='draft' i]",
+            "svg:has(path[d*='M12.994 15.506'])",
+            "[role='button']:has(svg path[d*='M12.994 15.506'])",
+            "[aria-label='더 보기']",
+            "[aria-label='More']",
+            "svg[aria-label='더 보기']",
+            "svg[aria-label='More']",
+            "svg:has(title:text-is('더 보기'))",
+            "svg:has(title:text-is('More'))",
+        ]
+        combined_selector = ", ".join(trigger_selectors)
+
+        # 1. 작성창(composer) 내부 또는 페이지 전체에서 후보 버튼 수집
+        candidates = []
+        if composer is not None:
+            try:
+                comp_locator = composer.locator(combined_selector)
+                for index in range(comp_locator.count()):
+                    candidates.append(comp_locator.nth(index))
+            except Exception:
+                pass
+
+        if not candidates:
+            try:
+                page_locator = page.locator(combined_selector)
+                for index in range(page_locator.count()):
+                    candidates.append(page_locator.nth(index))
+            except Exception:
+                pass
+
+        if not candidates:
+            self.logger.error("Threads [임시 저장본] 또는 [더 보기] 버튼을 찾지 못했어요. 즉시 게시하지 않고 중단해요.")
             return False
 
-        more_clicked = False
-        for index in range(more_icons.count() - 1, -1, -1):
-            more_icon = more_icons.nth(index)
+        menu_opened = False
+        for trigger in reversed(candidates):
             try:
-                if not more_icon.is_visible():
+                if not trigger.is_visible():
                     continue
 
-                # 실제 화면에서 aria-label은 SVG에 있고 클릭 이벤트는 바깥
-                # role=button 요소에 걸려 있어요. SVG 중심을 누르면 두 구조를
-                # 모두 처리하면서 중간 래퍼 div의 변화에도 영향을 받지 않아요.
-                more_icon.scroll_into_view_if_needed()
-                box = more_icon.bounding_box()
+                trigger.scroll_into_view_if_needed()
+                box = trigger.bounding_box()
                 if box:
                     page.mouse.click(
                         box["x"] + box["width"] / 2,
                         box["y"] + box["height"] / 2,
                     )
                 else:
-                    more_icon.click(force=True)
-                more_clicked = True
-                break
+                    trigger.click(force=True)
+
+                page.wait_for_timeout(400)
+
+                # 메뉴 아이템이 노출되었는지 확인 및 클릭
+                if self._click_threads_menu_item(page, schedule_menu_labels, max_wait_ms=2500):
+                    menu_opened = True
+                    break
             except Exception:
                 continue
 
-        if not more_clicked:
-            self.logger.error("Threads [더 보기] 버튼이 보이지만 클릭하지 못했어요. 즉시 게시하지 않고 중단해요.")
-            return False
-        page.wait_for_timeout(500)
+        if not menu_opened:
+            # 마지막 fallback: JS로 직접 클릭 시도
+            try:
+                page.evaluate("""() => {
+                    const visible = el => {
+                        const r = el.getBoundingClientRect();
+                        const s = window.getComputedStyle(el);
+                        return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+                    };
+                    const elements = Array.from(document.querySelectorAll("[role='button'], button, div[aria-label], span[aria-label]"));
+                    for (let i = elements.length - 1; i >= 0; i--) {
+                        const el = elements[i];
+                        if (!visible(el)) continue;
+                        const label = el.getAttribute('aria-label') || '';
+                        if (/임시\\s*저장본|Drafts?|더\\s*보기|More/i.test(label) || el.querySelector("path[d*='M12.994 15.506']")) {
+                            const clickable = el.closest("[role='button'], button, [tabindex='0']") || el;
+                            clickable.click();
+                            clickable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                            return true;
+                        }
+                    }
+                    return false;
+                }""")
+                page.wait_for_timeout(400)
+                if self._click_threads_menu_item(page, schedule_menu_labels, max_wait_ms=2500):
+                    menu_opened = True
+            except Exception:
+                pass
 
-        if not self._click_threads_menu_item(page, ["예약...", "예약…", "Schedule...", "Schedule…"]):
-            self.logger.error("Threads [예약...] 메뉴를 찾지 못했어요. 즉시 게시하지 않고 중단해요.")
+        if not menu_opened:
+            self.logger.error("Threads [예약...] 메뉴를 열거나 찾지 못했어요. 즉시 게시하지 않고 중단해요.")
             return False
+
         page.wait_for_timeout(700)
 
         self.logger.info(f"Threads 예약 입력 시작: {scheduled_at:%Y-%m-%d %H:%M}")
@@ -82,47 +139,80 @@ class ThreadsUploader(BaseUploader):
             self.logger.error("Threads 예약 날짜 또는 시간을 입력하지 못했어요. 즉시 게시하지 않고 중단해요.")
             return False
 
-        if not self._click_threads_menu_item(page, ["완료", "Done"]):
+        if not self._click_threads_menu_item(page, ["완료", "Done"], max_wait_ms=3000):
             self.logger.error("Threads 예약 달력의 [완료] 버튼을 찾지 못했어요.")
             return False
         page.wait_for_timeout(700)
 
-        if self._get_threads_final_schedule_point(page) is None:
+        # 최종 [예약] 버튼 표시 확인 (최대 3초 대기)
+        final_ready = False
+        for _ in range(10):
+            if self._get_threads_final_schedule_point(page) is not None:
+                final_ready = True
+                break
+            has_btn = page.evaluate("""() => {
+                const normalize = v => (v || '').replace(/\\s+/g, ' ').trim();
+                const elements = Array.from(document.querySelectorAll("button, [role='button'], div, span"));
+                return elements.some(el => {
+                    const txt = normalize(el.textContent);
+                    if (!['예약', 'Schedule'].includes(txt)) return false;
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                });
+            }""")
+            if has_btn:
+                final_ready = True
+                break
+            page.wait_for_timeout(300)
+
+        if not final_ready:
             self.logger.error("Threads 작성 창에 최종 [예약] 버튼이 나타나지 않았어요.")
             return False
 
         self.logger.info(f"Threads 자체 예약 설정 완료: {scheduled_at:%Y-%m-%d %H:%M}")
         return True
 
-    def _click_threads_menu_item(self, page, labels: list[str]) -> bool:
-        """보이는 Threads 메뉴/달력에서 정확한 문구의 클릭 요소를 누릅니다."""
-        try:
-            return page.evaluate("""(targetLabels) => {
-                const elements = Array.from(document.querySelectorAll("button, [role='button'], [role='menuitem'], div, span"));
-                const matches = [];
-                const seen = new Set();
-                for (const element of elements) {
-                    const text = element.textContent ? element.textContent.trim() : '';
-                    if (!targetLabels.includes(text)) continue;
-                    const clickable = element.closest("button, [role='button'], [role='menuitem'], [tabindex='0']") || element;
-                    if (seen.has(clickable)) continue;
-                    const rect = clickable.getBoundingClientRect();
-                    if (rect.width <= 0 || rect.height <= 0) continue;
-                    seen.add(clickable);
-                    const semantic = clickable.matches("button, [role='button'], [role='menuitem'], [tabindex='0']");
-                    matches.push({ clickable, semantic, area: rect.width * rect.height });
-                }
-                if (matches.length === 0) return false;
-                matches.sort((a, b) => Number(b.semantic) - Number(a.semantic) || a.area - b.area);
-                matches[0].clickable.click();
-                return true;
-            }""", labels)
-        except Exception:
-            return False
+    def _click_threads_menu_item(self, page, labels: list[str], max_wait_ms: int = 3000) -> bool:
+        """보이는 Threads 메뉴/달력에서 정확한 문구의 클릭 요소를 찾아 누릅니다."""
+        start_time = time.time()
+        timeout_seconds = max_wait_ms / 1000.0
+        while True:
+            try:
+                clicked = page.evaluate("""(targetLabels) => {
+                    const normalize = v => (v || '').replace(/\\s+/g, ' ').trim();
+                    const elements = Array.from(document.querySelectorAll("button, [role='button'], [role='menuitem'], div, span"));
+                    const matches = [];
+                    const seen = new Set();
+                    for (const element of elements) {
+                        const text = normalize(element.textContent);
+                        if (!targetLabels.some(l => text === l || text === normalize(l))) continue;
+                        const clickable = element.closest("button, [role='button'], [role='menuitem'], [tabindex='0']") || element;
+                        if (seen.has(clickable)) continue;
+                        const rect = clickable.getBoundingClientRect();
+                        const style = window.getComputedStyle(clickable);
+                        if (rect.width <= 0 || rect.height <= 0 || style.display === 'none' || style.visibility === 'hidden') continue;
+                        seen.add(clickable);
+                        const semantic = clickable.matches("button, [role='button'], [role='menuitem'], [tabindex='0']");
+                        matches.push({ clickable, semantic, area: rect.width * rect.height });
+                    }
+                    if (matches.length === 0) return false;
+                    matches.sort((a, b) => Number(b.semantic) - Number(a.semantic) || a.area - b.area);
+                    matches[0].clickable.click();
+                    matches[0].clickable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                    return true;
+                }""", labels)
+                if clicked:
+                    return True
+            except Exception:
+                pass
+            if time.time() - start_time >= timeout_seconds:
+                break
+            page.wait_for_timeout(200)
+        return False
 
     @staticmethod
     def _get_threads_final_schedule_point(page):
-        """시계 아이콘과 예약 문구가 함께 있는 최종 버튼의 중심 좌표를 찾아요."""
+        """시계 아이콘 또는 예약 문구가 있는 최종 예약 버튼의 중심 좌표를 찾아요."""
         try:
             return page.evaluate(r"""() => {
                 const visible = element => {
@@ -132,43 +222,44 @@ class ThreadsUploader(BaseUploader):
                         style.display !== 'none' && style.visibility !== 'hidden';
                 };
                 const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
-                const candidates = Array.from(document.querySelectorAll('div'))
+                const candidates = Array.from(document.querySelectorAll('div, span, button, [role="button"]'))
                     .filter(label => ['예약', 'Schedule'].includes(normalize(label.textContent)))
                     .map(label => {
-                        const content = label.parentElement;
-                        if (!content || !content.querySelector('svg')) return null;
-                        const clickable = content.closest(
+                        const clickable = label.closest(
                             'button, [role="button"], [tabindex="0"], [data-pressable-container="true"]'
-                        ) || content;
+                        ) || label;
                         if (!visible(clickable)) return null;
                         const rect = clickable.getBoundingClientRect();
                         const semantic = clickable.matches(
                             'button, [role="button"], [tabindex="0"], [data-pressable-container="true"]'
                         );
+                        const hasSvg = Boolean(clickable.querySelector('svg'));
                         return {
                             x: rect.x + rect.width / 2,
                             y: rect.y + rect.height / 2,
-                            semantic,
+                            priority: (semantic ? 2 : 0) + (hasSvg ? 1 : 0),
                             area: rect.width * rect.height,
                         };
                     })
                     .filter(Boolean)
-                    .sort((a, b) => Number(b.semantic) - Number(a.semantic) || a.area - b.area);
+                    .sort((a, b) => b.priority - a.priority || a.area - b.area);
                 return candidates.length > 0 ? { x: candidates[0].x, y: candidates[0].y } : null;
             }""")
         except Exception:
             return None
 
     def _click_threads_final_schedule(self, page) -> bool:
-        """날짜와 시간을 확정한 뒤 시계 아이콘이 있는 최종 예약 버튼을 눌러요."""
+        """날짜와 시간을 확정한 뒤 최종 예약 버튼을 눌러요."""
         point = self._get_threads_final_schedule_point(page)
-        if point is None:
-            return False
-        try:
-            page.mouse.click(point["x"], point["y"])
-            return True
-        except Exception:
-            return False
+        if point is not None:
+            try:
+                page.mouse.click(point["x"], point["y"])
+                page.wait_for_timeout(500)
+                return True
+            except Exception:
+                pass
+        # point를 못 찾거나 마우스 클릭 실패 시 fallback으로 메뉴 아이템 클릭 시도
+        return self._click_threads_menu_item(page, ["예약", "Schedule"], max_wait_ms=2000)
 
     def _fill_threads_schedule_time(self, page, scheduled_at) -> bool:
         """Threads 달력 하단의 24시간제 시·분 입력을 설정합니다."""
@@ -305,9 +396,16 @@ class ThreadsUploader(BaseUploader):
         """Threads 날짜 grid에서 연·월·일이 일치하는 gridcell 자체를 눌러요."""
         date_grid = page.locator(
             "[role='grid'][aria-label='날짜 선택'], "
-            "[role='grid'][aria-label*='date' i]"
+            "[role='grid'][aria-label*='date' i], "
+            "[role='grid']"
         )
-        visible_grid = self._last_visible(date_grid)
+        visible_grid = None
+        for _ in range(15):
+            visible_grid = self._last_visible(date_grid)
+            if visible_grid is not None:
+                break
+            page.wait_for_timeout(300)
+
         if visible_grid is None:
             self.logger.error("Threads [날짜 선택] 그리드를 찾지 못했어요.")
             return False
@@ -844,7 +942,7 @@ class ThreadsUploader(BaseUploader):
                     except Exception as e:
                         self.logger.warning(f"스레드 텍스트 입력 실패 (무시): {e}")
 
-                if scheduled_at and not self._configure_native_schedule(page, scheduled_at):
+                if scheduled_at and not self._configure_native_schedule(page, scheduled_at, composer=composer):
                     browser.close()
                     return False
 
