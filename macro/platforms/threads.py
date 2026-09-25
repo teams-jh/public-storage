@@ -686,26 +686,7 @@ class ThreadsUploader(BaseUploader):
 
     def _maximize_threads_browser(self, page) -> None:
         """Threads 달력 전체가 보이도록 Chromium 창을 최대화해요."""
-        session = None
-        try:
-            session = page.context.new_cdp_session(page)
-            window = session.send("Browser.getWindowForTarget")
-            session.send(
-                "Browser.setWindowBounds",
-                {
-                    "windowId": window["windowId"],
-                    "bounds": {"windowState": "maximized"},
-                },
-            )
-            self.logger.info("Threads 브라우저 창을 최대화했어요.")
-        except Exception as error:
-            self.logger.warning(f"Threads 브라우저 창 최대화를 적용하지 못했어요: {error}")
-        finally:
-            if session is not None:
-                try:
-                    session.detach()
-                except Exception:
-                    pass
+        self.maximize_browser(page)
 
     def upload(self, media_path: Path, metadata: dict) -> bool:
         """

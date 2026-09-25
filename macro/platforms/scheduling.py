@@ -46,6 +46,338 @@ def fill_native_date_time(scope, scheduled_at: datetime) -> bool:
     return date_filled and time_filled
 
 
+def scroll_calendar_into_view(page) -> None:
+    """열려 있는 달력 팝업/컨테이너가 화면에 온전히 보이도록 스크롤을 내립니다."""
+    try:
+        page.evaluate(r"""() => {
+            const isVisible = el => {
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+            };
+
+            // 1. 달력 관련 주요 컨테이너 탐색
+            const calendarSelectors = [
+                "[role='grid']",
+                "[role='dialog'] table",
+                "[aria-roledescription='calendar']",
+                "ytcp-date-picker",
+                "div[role='dialog'] div[tabindex='-1']",
+                "div[role='dialog'] div:has(> [role='gridcell'])"
+            ];
+            let calendarEl = null;
+            for (const sel of calendarSelectors) {
+                const candidates = Array.from(document.querySelectorAll(sel)).filter(isVisible);
+                if (candidates.length > 0) {
+                    calendarEl = candidates[candidates.length - 1];
+                    break;
+                }
+            }
+
+            // 헤더 텍스트로 달력 부모 찾기 fallback
+            if (!calendarEl) {
+                const allElements = Array.from(document.querySelectorAll("div, span")).filter(isVisible);
+                const monthNode = allElements.find(el => {
+                    const text = (el.textContent || '').trim();
+                    return /^\d{4}년\s*\d{1,2}월/.test(text) || /^(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}/i.test(text);
+                });
+                if (monthNode) {
+                    calendarEl = monthNode.closest("[role='dialog'], [role='grid'], div") || monthNode.parentElement;
+                }
+            }
+
+            if (calendarEl) {
+                calendarEl.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+                const rect = calendarEl.getBoundingClientRect();
+                const bottomDiff = rect.bottom - window.innerHeight;
+                if (bottomDiff > 0) {
+                    window.scrollBy(0, bottomDiff + 40);
+                }
+
+                // 부모 스크롤 컨테이너 탐색 및 스크롤
+                let parent = calendarEl.parentElement;
+                while (parent && parent !== document.body) {
+                    const style = window.getComputedStyle(parent);
+                    const overflowY = style.overflowY;
+                    if ((overflowY === 'auto' || overflowY === 'scroll') && parent.scrollHeight > parent.clientHeight) {
+                        const pRect = parent.getBoundingClientRect();
+                        const pOverflow = rect.bottom - pRect.bottom;
+                        if (pOverflow > -30) {
+                            parent.scrollTop += (pOverflow + 50);
+                        }
+                    }
+                    parent = parent.parentElement;
+                }
+            }
+
+            // 모달(dialog) 내부의 스크롤 컨테이너 아래로 보정 스크롤
+            const dialog = document.querySelector("div[role='dialog']");
+            if (dialog) {
+                const scrollables = Array.from(dialog.querySelectorAll("*")).filter(el => {
+                    const style = window.getComputedStyle(el);
+                    const overflowY = style.overflowY;
+                    return (overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight;
+                });
+                for (const el of scrollables) {
+                    if (el.scrollHeight - el.scrollTop - el.clientHeight > 10) {
+                        el.scrollTop += 250;
+                    }
+                }
+            }
+        }""")
+        page.wait_for_timeout(300)
+    except Exception:
+        pass
+
+
+def _get_calendar_displayed_month(page) -> dict | None:
+    """달력에 현재 표시된 연/월 정보를 읽어옵니다."""
+    try:
+        return page.evaluate(r"""() => {
+            const isVisible = el => {
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+            };
+
+            // 1. Next/Previous 버튼과 같은 컨테이너의 텍스트 탐색
+            const nextBtns = Array.from(document.querySelectorAll("button[aria-label*='Next' i], button[aria-label*='다음']")).filter(isVisible);
+            for (const btn of nextBtns) {
+                const parent = btn.parentElement;
+                if (parent) {
+                    const spans = Array.from(parent.querySelectorAll("span, div")).filter(isVisible);
+                    for (const s of spans) {
+                        const txt = (s.textContent || '').trim();
+                        const m = txt.match(/(\d{4})년\s*(\d{1,2})월/);
+                        if (m) return { year: parseInt(m[1]), month: parseInt(m[2]), text: txt };
+                    }
+                }
+            }
+
+            // 2. 전체 페이지 내 모든 span/div에서 'YYYY년 M월' 패턴 탐색
+            const allElements = Array.from(document.querySelectorAll("span, div")).filter(isVisible);
+            for (const el of allElements) {
+                const txt = (el.textContent || '').trim();
+                const m = txt.match(/^(\d{4})년\s*(\d{1,2})월$/);
+                if (m) return { year: parseInt(m[1]), month: parseInt(m[2]), text: txt };
+            }
+
+            // 3. 영문 Month YYYY 패턴 탐색
+            const monthsEng = {
+                january: 1, jan: 1, february: 2, feb: 2, march: 3, mar: 3,
+                april: 4, apr: 4, may: 5, june: 6, jun: 6,
+                july: 7, jul: 7, august: 8, aug: 8, september: 9, sep: 9,
+                october: 10, oct: 10, november: 11, nov: 11, december: 12, dec: 12
+            };
+            for (const el of allElements) {
+                const txt = (el.textContent || '').trim().toLowerCase();
+                const mEng = txt.match(/^([a-z]+)\s+(\d{4})$/);
+                if (mEng && monthsEng[mEng[1]]) {
+                    return { year: parseInt(mEng[2]), month: monthsEng[mEng[1]], text: txt };
+                }
+            }
+
+            return null;
+        }""")
+    except Exception:
+        return None
+
+
+def _click_calendar_next_button(page) -> bool:
+    """달력 상단의 다음 달(>) 버튼을 찾아 클릭합니다."""
+    # 1. Playwright Locator 탐색 후 실제 물리 마우스 클릭
+    next_selectors = [
+        "button[aria-label='Next month']",
+        "button[aria-label*='Next' i]",
+        "button[aria-label*='다음']",
+        "div[role='button'][aria-label*='다음']",
+        "span:has-text('월') ~ button",
+        "div:has(> span:has-text('월')) button:last-of-type"
+    ]
+    for sel in next_selectors:
+        loc = page.locator(sel)
+        for i in range(loc.count()):
+            btn = loc.nth(i)
+            try:
+                if btn.is_visible() and not btn.is_disabled():
+                    btn.scroll_into_view_if_needed()
+                    page.wait_for_timeout(100)
+                    box = btn.bounding_box()
+                    if box:
+                        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                    else:
+                        btn.click(force=True)
+                    page.wait_for_timeout(350)
+                    return True
+            except Exception:
+                continue
+
+    # 2. JS evaluate로 DOM 상의 다음 달(>) 버튼 탐색 및 전체 마우스 이벤트 발화
+    try:
+        clicked = page.evaluate(r"""() => {
+            const isVisible = el => {
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+            };
+
+            let targetBtn = document.querySelector("button[aria-label='Next month'], button[aria-label*='Next' i], button[aria-label*='다음']");
+            if (!targetBtn || !isVisible(targetBtn)) {
+                const spans = Array.from(document.querySelectorAll("span")).filter(isVisible);
+                for (const s of spans) {
+                    if (/(\d{4})년\s*(\d{1,2})월/.test((s.textContent || '').trim())) {
+                        const buttons = Array.from(s.parentElement.querySelectorAll("button")).filter(isVisible);
+                        if (buttons.length >= 2) {
+                            targetBtn = buttons[buttons.length - 1];
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!targetBtn) return false;
+
+            targetBtn.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(name => {
+                targetBtn.dispatchEvent(new MouseEvent(name, {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    buttons: 1
+                }));
+            });
+            targetBtn.click();
+            return true;
+        }""")
+        if clicked:
+            page.wait_for_timeout(350)
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def _navigate_instagram_to_target_month(page, scheduled_at: datetime) -> bool:
+    """현재 달력의 월을 확인하며 목표 연/월에 도달할 때까지 > (다음 달) 버튼을 넘깁니다."""
+    target_year = scheduled_at.year
+    target_month = scheduled_at.month
+
+    # 최대 12회 (1년치) 이동 시도
+    for attempt in range(12):
+        month_info = _get_calendar_displayed_month(page)
+        if month_info:
+            cur_year = month_info["year"]
+            cur_month = month_info["month"]
+            month_diff = (target_year - cur_year) * 12 + (target_month - cur_month)
+            if month_diff == 0:
+                # 목표 연/월에 도달 완료!
+                return True
+            elif month_diff > 0:
+                # 다음 달(>) 버튼 클릭
+                _click_calendar_next_button(page)
+                page.wait_for_timeout(400)
+            else:
+                # 이전 달(<) 버튼 클릭
+                prev_btn = page.locator("button[aria-label='Previous month'], button[aria-label*='이전']")
+                if prev_btn.count() > 0 and prev_btn.first.is_visible() and not prev_btn.first.is_disabled():
+                    prev_btn.first.scroll_into_view_if_needed()
+                    prev_btn.first.click(force=True)
+                    page.wait_for_timeout(400)
+                else:
+                    break
+        else:
+            # 월 헤더 텍스트를 감지하지 못한 경우 현재 달과 비교하여 강제 다음 달(>) 클릭
+            now = datetime.now()
+            month_diff = (target_year - now.year) * 12 + (target_month - now.month)
+            if month_diff > 0:
+                for _ in range(month_diff):
+                    _click_calendar_next_button(page)
+                    page.wait_for_timeout(400)
+            return True
+
+    return False
+
+
+def _select_instagram_calendar_day(page, scheduled_at: datetime) -> bool:
+    """Instagram 달력 DOM (role='grid' 및 button[role='gridcell'])에서 목표 연/월 이동 및 날짜를 선택합니다."""
+    # 1. 달이 다른 경우 > 버튼을 눌러 목표 월로 이동
+    _navigate_instagram_to_target_month(page, scheduled_at)
+    page.wait_for_timeout(350)
+
+    day_str = str(scheduled_at.day)
+
+    # 2. role='grid' 내의 활성화된 button[role='gridcell'] 중에서 해당 날짜 클릭
+    # 방법 1: Playwright Locator로 bounding_box 구해서 실제 물리 마우스 클릭
+    try:
+        active_cells = page.locator(
+            "[role='grid'] button[role='gridcell']:not([aria-disabled='true']), "
+            "[role='grid'] button:not([aria-disabled='true'])"
+        )
+        for i in range(active_cells.count()):
+            cell = active_cells.nth(i)
+            try:
+                txt = cell.inner_text().strip()
+                if txt == day_str:
+                    cell.scroll_into_view_if_needed()
+                    page.wait_for_timeout(100)
+                    box = cell.bounding_box()
+                    if box:
+                        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                    else:
+                        cell.click(force=True)
+                    page.wait_for_timeout(400)
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # 방법 2: JS evaluate로 정확한 타겟 버튼 탐색 및 React Synthetic/Mouse Event 디스패치
+    try:
+        clicked = page.evaluate(r"""(targetDay) => {
+            const isVisible = el => {
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+            };
+
+            const grids = Array.from(document.querySelectorAll("[role='grid']")).filter(isVisible);
+            for (const grid of grids) {
+                const buttons = Array.from(grid.querySelectorAll("button[role='gridcell'], button")).filter(isVisible);
+                for (const btn of buttons) {
+                    if (btn.getAttribute('aria-disabled') === 'true') continue;
+                    const spans = Array.from(btn.querySelectorAll("span"));
+                    const spanTexts = spans.map(s => (s.textContent || '').trim());
+                    const btnText = (btn.textContent || '').trim();
+                    if (btnText === String(targetDay) || spanTexts.includes(String(targetDay))) {
+                        btn.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+                        const events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+                        for (const name of events) {
+                            btn.dispatchEvent(new MouseEvent(name, {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                buttons: 1
+                            }));
+                        }
+                        btn.click();
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }""", scheduled_at.day)
+
+        if clicked:
+            page.wait_for_timeout(400)
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
 def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool = False) -> bool:
     """라벨 기반 날짜 선택기를 열고 원하는 날짜를 선택합니다."""
     if not picker_already_open:
@@ -111,6 +443,7 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
                 page.wait_for_timeout(350)
 
                 expanded = date_trigger.get_attribute("aria-expanded") == "true"
+                grid_visible = page.locator("[role='grid']").count() > 0
                 month_header = page.locator(
                     f"span:text-is('{datetime.now().year}년 {datetime.now().month}월'), "
                     f"div:text-is('{datetime.now().year}년 {datetime.now().month}월')"
@@ -119,7 +452,7 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
                     month_header.nth(index).is_visible()
                     for index in range(month_header.count())
                 )
-                if expanded or calendar_visible:
+                if expanded or grid_visible or calendar_visible:
                     trigger_clicked = True
                     break
             except Exception:
@@ -127,7 +460,15 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
         if not trigger_clicked:
             return False
 
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(400)
+    # 달력이 켜진 후 달력 및 부모 스크롤 컨테이너를 아래로 스크롤하여 달력 전체 노출
+    scroll_calendar_into_view(page)
+
+    # 1. Instagram role='grid' 구조 최적화 클릭 우선 시도
+    if _select_instagram_calendar_day(page, scheduled_at):
+        return True
+
+    # 2. 범용 달력(YouTube Studio 등) fallback 로직
     today = datetime.now()
     month_steps = (scheduled_at.year - today.year) * 12 + scheduled_at.month - today.month
     direction_labels = (
@@ -142,8 +483,12 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
         )
         if month_button.count() == 0:
             return False
+        month_button.last.scroll_into_view_if_needed()
         month_button.last.click(force=True)
         page.wait_for_timeout(250)
+
+    # 월 변경 후에도 달력 위치 스크롤 재보정
+    scroll_calendar_into_view(page)
 
     day_text = str(scheduled_at.day)
     try:
@@ -189,6 +534,7 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
                 });
             if (fullDateControls.length > 0) {
                 const clickable = fullDateControls[0].closest("button, [role='button'], [tabindex='0']") || fullDateControls[0];
+                clickable.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
                 clickable.click();
                 return true;
             }
@@ -207,7 +553,9 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
             if (matches.length === 0) return false;
 
             matches.sort((a, b) => a.area - b.area);
-            matches[0].clickable.click();
+            const clickable = matches[0].clickable;
+            clickable.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+            clickable.click();
             return true;
         }""", {
             "year": scheduled_at.year,
@@ -233,11 +581,25 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
     for index in range(day_candidates.count() - 1, -1, -1):
         candidate = day_candidates.nth(index)
         try:
+            candidate.scroll_into_view_if_needed()
             if candidate.is_visible():
                 candidate.click(force=True)
                 return True
         except Exception:
             continue
+
+    # 추가 방어: 마우스 휠로 살짝 스크롤 후 다시 시도
+    try:
+        page.mouse.wheel(0, 200)
+        page.wait_for_timeout(300)
+        for index in range(day_candidates.count() - 1, -1, -1):
+            candidate = day_candidates.nth(index)
+            if candidate.is_visible():
+                candidate.click(force=True)
+                return True
+    except Exception:
+        pass
+
     return False
 
 

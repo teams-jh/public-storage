@@ -342,9 +342,14 @@ class TwitterXUploader(BaseUploader):
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
                     headless=False,
-                    args=["--disable-blink-features=AutomationControlled"]
+                    no_viewport=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--start-maximized",
+                    ],
                 )
                 page = browser.new_page()
+                self.maximize_browser(page)
                 page.on("filechooser", lambda fc: None)
 
                 page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=60000)

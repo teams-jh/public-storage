@@ -19,6 +19,42 @@ class BaseUploader(ABC):
         self.platform_name = platform_name
         self.logger = logging.getLogger(platform_name)
 
+    def maximize_browser(self, page) -> None:
+        """Chromium 브라우저 창을 최대화(전체 화면)합니다."""
+        session = None
+        try:
+            session = page.context.new_cdp_session(page)
+            window = session.send("Browser.getWindowForTarget")
+            session.send(
+                "Browser.setWindowBounds",
+                {
+                    "windowId": window["windowId"],
+                    "bounds": {"windowState": "maximized"},
+                },
+            )
+            self.logger.info(f"{self.platform_name} 브라우저 창을 최대화(전체 화면)했어요.")
+        except Exception as error:
+            self.logger.warning(f"{self.platform_name} 브라우저 창 최대화에 실패했어요: {error}")
+            try:
+                screen_size = page.evaluate("""() => ({
+                    width: window.screen.availWidth || 1920,
+                    height: window.screen.availHeight || 1080
+                })""")
+                if screen_size and screen_size.get("width") and screen_size.get("height"):
+                    page.set_viewport_size({
+                        "width": screen_size["width"],
+                        "height": screen_size["height"]
+                    })
+                    self.logger.info(f"{self.platform_name} 뷰포트를 화면 전체 크기({screen_size['width']}x{screen_size['height']})로 설정했어요.")
+            except Exception:
+                pass
+        finally:
+            if session is not None:
+                try:
+                    session.detach()
+                except Exception:
+                    pass
+
     def save_result_screenshot(self, page, result: str = "success") -> Path | None:
         """브라우저 업로드 결과 화면을 macro/screenshot 폴더에 저장합니다."""
         try:

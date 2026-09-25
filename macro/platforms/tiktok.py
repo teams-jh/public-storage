@@ -648,9 +648,14 @@ class TikTokUploader(BaseUploader):
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
                     headless=False,
-                    args=["--disable-blink-features=AutomationControlled"]
+                    no_viewport=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--start-maximized",
+                    ],
                 )
                 page = browser.new_page()
+                self.maximize_browser(page)
                 # 원치 않는 파일 다이얼로그가 열렸을 때 자동 취소
                 page.on("filechooser", lambda fc: None)
 

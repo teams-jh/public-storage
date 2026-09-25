@@ -181,6 +181,45 @@ class InstagramUploader(BaseUploader):
             self.logger.error("Instagram [게시물]을 선택했지만 업로드 모달이 열리지 않았어요.")
             return False
 
+    def _scroll_dialog_down(self, page, target_selector: str | None = None, amount: int = 400) -> None:
+        """Instagram 작성 모달 내부의 스크롤 컨테이너를 아래로 스크롤합니다."""
+        try:
+            if target_selector:
+                loc = page.locator(target_selector)
+                if loc.count() > 0 and loc.first.is_visible():
+                    loc.first.scroll_into_view_if_needed()
+                    page.wait_for_timeout(200)
+
+            page.evaluate("""(scrollAmount) => {
+                const dialog = document.querySelector("div[role='dialog']");
+                if (!dialog) {
+                    window.scrollBy(0, scrollAmount);
+                    return;
+                }
+                const scrollables = Array.from(dialog.querySelectorAll("*")).filter(el => {
+                    const style = window.getComputedStyle(el);
+                    const overflowY = style.overflowY;
+                    return (overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight;
+                });
+                for (const el of scrollables) {
+                    el.scrollTop += scrollAmount;
+                }
+                if (scrollables.length === 0 && dialog.scrollHeight > dialog.clientHeight) {
+                    dialog.scrollTop += scrollAmount;
+                }
+            }""", amount)
+            page.wait_for_timeout(250)
+
+            dialog = page.locator("div[role='dialog']")
+            if dialog.count() > 0:
+                box = dialog.first.bounding_box()
+                if box:
+                    page.mouse.move(box["x"] + box["width"] * 0.75, box["y"] + box["height"] * 0.6)
+                    page.mouse.wheel(0, amount)
+                    page.wait_for_timeout(250)
+        except Exception as error:
+            self.logger.warning(f"Instagram 모달 스크롤 중 예외 (무시): {error}")
+
     def _configure_native_schedule(self, page, scheduled_at: datetime) -> bool:
         """Instagram 고급 설정의 콘텐츠 예약 기능을 설정합니다."""
         if scheduled_at - datetime.now() > timedelta(days=INSTAGRAM_SCHEDULE_MAX_DAYS):
@@ -194,11 +233,15 @@ class InstagramUploader(BaseUploader):
             "div[role='dialog'] span:text-is('Advanced settings')"
         )
         try:
+            advanced_settings.last.scroll_into_view_if_needed()
             advanced_settings.last.click(force=True)
             page.wait_for_timeout(800)
         except Exception:
             self.logger.error("Instagram 고급 설정을 열지 못했어요.")
             return False
+
+        # 고급 설정 열린 후 모달 스크롤 다운 (예약 스위치 노출)
+        self._scroll_dialog_down(page, amount=300)
 
         schedule_labels = page.locator(
             "div[role='dialog'] div:text-is('콘텐츠 예약'), "
@@ -231,6 +274,7 @@ class InstagramUploader(BaseUploader):
             return False
 
         try:
+            toggle.scroll_into_view_if_needed()
             checked = toggle.get_attribute("aria-checked")
             if checked != "true" and not toggle.is_checked():
                 toggle.click(force=True)
@@ -242,10 +286,30 @@ class InstagramUploader(BaseUploader):
                 return False
 
         page.wait_for_timeout(700)
+        # 스위치가 켜진 후 그 아래 날짜/시간 설정 UI가 나타나므로 모달을 아래로 충분히 스크롤
+        self.logger.info("Instagram 예약 스위치 ON -> 날짜/시간 설정 영역 노출을 위해 모달을 아래로 스크롤해요.")
+        self._scroll_dialog_down(page, amount=400)
+        page.wait_for_timeout(500)
+
         # Instagram은 현재 날짜가 표시되어 있어도 달력을 열어 날짜를 직접 선택해야 합니다.
         date_set = choose_calendar_date(page, scheduled_at)
         page.wait_for_timeout(500)
-        date_set = date_set and self._is_instagram_date_selected(page, scheduled_at)
+
+        # 달력 날짜 선택 실패 시 추가 스크롤 후 재시도
+        if not date_set:
+            self.logger.warning("Instagram 달력 날짜 선택 1차 미완료 -> 추가 스크롤 후 재시도해요...")
+            self._scroll_dialog_down(page, amount=400)
+            page.wait_for_timeout(400)
+            date_set = choose_calendar_date(page, scheduled_at, picker_already_open=True)
+            if not date_set:
+                date_set = choose_calendar_date(page, scheduled_at, picker_already_open=False)
+            page.wait_for_timeout(500)
+
+        # 날짜 선택 결과 검증 (choose_calendar_date 성공 또는 화면 내 날짜 텍스트 반영)
+        date_set = date_set or self._is_instagram_date_selected(page, scheduled_at)
+
+        # 날짜 선택 후 시간 입력 영역 스크롤 확보
+        self._scroll_dialog_down(page, amount=250)
 
         # Instagram 시간 입력은 Hours, Minutes, AM PM의 세 필드로 나뉩니다.
         time_set = self._fill_instagram_time(page, scheduled_at)
@@ -262,6 +326,13 @@ class InstagramUploader(BaseUploader):
         minutes = page.locator("input[role='spinbutton'][aria-label='Minutes']")
         meridiem = page.locator("input[role='spinbutton'][aria-label='AM PM']")
         if hours.count() == 0 or minutes.count() == 0 or meridiem.count() == 0:
+            # 화면 아래로 가려져 있을 수 있으므로 추가 스크롤 후 재검색
+            self._scroll_dialog_down(page, amount=300)
+            hours = page.locator("input[role='spinbutton'][aria-label='Hours']")
+            minutes = page.locator("input[role='spinbutton'][aria-label='Minutes']")
+            meridiem = page.locator("input[role='spinbutton'][aria-label='AM PM']")
+
+        if hours.count() == 0 or minutes.count() == 0 or meridiem.count() == 0:
             self.logger.error("Instagram의 Hours, Minutes, AM PM 시간 입력 항목을 찾지 못했어요.")
             return False
 
@@ -272,12 +343,14 @@ class InstagramUploader(BaseUploader):
 
         try:
             for field, value in ((hours.first, hour_text), (minutes.first, minute_text)):
+                field.scroll_into_view_if_needed()
                 field.click(force=True)
                 field.press("Control+A")
                 field.type(value)
                 field.press("Tab")
                 page.wait_for_timeout(250)
 
+            meridiem.first.scroll_into_view_if_needed()
             current_meridiem = (
                 meridiem.first.get_attribute("aria-valuetext")
                 or meridiem.first.locator("xpath=preceding-sibling::label[1]").inner_text()
@@ -309,13 +382,30 @@ class InstagramUploader(BaseUploader):
 
     def _is_instagram_date_selected(self, page, scheduled_at: datetime) -> bool:
         """Instagram 예약 영역에 목표 날짜가 이미 선택되어 있는지 확인합니다."""
-        return page.evaluate("""(target) => {
+        return page.evaluate(r"""(target) => {
+            // 1) 달력 내부의 선택된 셀(aria-selected='true') 검사
+            const selectedCell = document.querySelector("[role='grid'] button[role='gridcell'][aria-selected='true']");
+            if (selectedCell && (selectedCell.textContent || '').trim() === String(target.day)) {
+                return true;
+            }
+
+            // 2) 날짜 표시 텍스트 전체 검사
             const dialog = document.querySelector("div[role='dialog']") || document.body;
             const text = dialog.innerText || '';
-            const korean = `${target.year}년 ${target.month}월 ${target.day}일`;
-            const iso = `${target.year}-${String(target.month).padStart(2, '0')}-${String(target.day).padStart(2, '0')}`;
-            const slash = `${String(target.month).padStart(2, '0')}/${String(target.day).padStart(2, '0')}/${target.year}`;
-            return text.includes(korean) || text.includes(iso) || text.includes(slash);
+            const patterns = [
+                `${target.year}년 ${target.month}월 ${target.day}일`,
+                `${target.year}-${String(target.month).padStart(2, '0')}-${String(target.day).padStart(2, '0')}`,
+                `${String(target.month).padStart(2, '0')}/${String(target.day).padStart(2, '0')}/${target.year}`,
+                `${target.year}. ${target.month}. ${target.day}`,
+                `${target.year}.${target.month}.${target.day}`,
+                `${target.year}. ${String(target.month).padStart(2, '0')}. ${String(target.day).padStart(2, '0')}`,
+                `${target.year}.${String(target.month).padStart(2, '0')}.${String(target.day).padStart(2, '0')}`,
+                `${target.month}월 ${target.day}일`
+            ];
+            for (const p of patterns) {
+                if (text.includes(p)) return true;
+            }
+            return false;
         }""", {
             "year": scheduled_at.year,
             "month": scheduled_at.month,
@@ -453,10 +543,15 @@ class InstagramUploader(BaseUploader):
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
                     headless=False,  # 첫 로그인/인증을 위해 브라우저 표시
+                    no_viewport=True,
                     permissions=["clipboard-read", "clipboard-write"],
-                    args=["--disable-blink-features=AutomationControlled"]
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--start-maximized",
+                    ],
                 )
                 page = browser.new_page()
+                self.maximize_browser(page)
                 page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(3000)
 
