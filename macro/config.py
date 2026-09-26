@@ -35,6 +35,9 @@ UPLOAD_TIMEOUT_SECONDS = 180
 # 로그인 및 2단계 인증 대기 최대 시간 (초 단위: 180초 = 3분)
 LOGIN_TIMEOUT_SECONDS = 180
 
+# 브라우저 업로드 실패 시 오류 화면을 확인할 수 있도록 창을 유지하는 시간입니다. 단위는 초입니다.
+UPLOAD_FAILURE_BROWSER_HOLD_SECONDS = 60
+
 # input.txt의 [TIME] 예약 시각 형식입니다. 연-월-일 시:분 단위이며 로컬 시간대를 사용합니다.
 SCHEDULE_TIME_FORMAT = "%Y-%m-%d %H:%M"
 

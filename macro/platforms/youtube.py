@@ -1,6 +1,7 @@
 import os
 import re
 import time
+from contextlib import contextmanager
 from datetime import timezone
 from pathlib import Path
 from platforms.base import BaseUploader
@@ -10,13 +11,46 @@ from platforms.scheduling import (
 )
 from config import (
     CONFIG, FORCE_BROWSER_UPLOAD, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
-    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
+    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb,
+    UPLOAD_FAILURE_BROWSER_HOLD_SECONDS,
 )
 
 class YouTubeUploader(BaseUploader):
     def __init__(self):
         super().__init__("YouTube")
         self.client_secrets_file = CONFIG.get("YOUTUBE_CLIENT_SECRETS_FILE")
+
+    @contextmanager
+    def _browser_upload_session(self, user_data_dir):
+        """실패 화면을 잠시 유지한 후 브라우저를 닫아요."""
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch_persistent_context(
+                user_data_dir=str(user_data_dir),
+                headless=False,
+                no_viewport=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--start-maximized",
+                ],
+            )
+            state = {"succeeded": False}
+            try:
+                yield browser, state
+            finally:
+                if not state["succeeded"] and not browser.is_closed():
+                    self.logger.warning(
+                        f"YouTube 업로드가 실패했어요. 브라우저를 {UPLOAD_FAILURE_BROWSER_HOLD_SECONDS}초 동안 유지해요."
+                    )
+                    deadline = time.monotonic() + UPLOAD_FAILURE_BROWSER_HOLD_SECONDS
+                    while not browser.is_closed():
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            break
+                        time.sleep(min(1, remaining))
+                if not browser.is_closed():
+                    browser.close()
 
     def _configure_native_schedule(self, page, scheduled_at) -> bool:
         """YouTube Studio 공개 상태 화면에서 예약 날짜와 시간을 설정합니다."""
@@ -403,7 +437,6 @@ class YouTubeUploader(BaseUploader):
 
     def _upload_via_playwright(self, video_path: Path, title: str, description: str, scheduled_at=None) -> bool:
         try:
-            from playwright.sync_api import sync_playwright
             user_data_dir = SESSION_DIR / "browser_youtube"
             user_data_dir.mkdir(exist_ok=True)
 
@@ -412,16 +445,7 @@ class YouTubeUploader(BaseUploader):
             sync_buffer = get_dynamic_sync_buffer(video_path)
 
             self.logger.info(f"YouTube Studio 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 완료 후 세션유지: {sync_buffer}초)")
-            with sync_playwright() as p:
-                browser = p.chromium.launch_persistent_context(
-                    user_data_dir=str(user_data_dir),
-                    headless=False,
-                    no_viewport=True,
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--start-maximized",
-                    ],
-                )
+            with self._browser_upload_session(user_data_dir) as (browser, browser_state):
                 page = browser.new_page()
                 self.maximize_browser(page)
                 page.goto("https://studio.youtube.com/", wait_until="domcontentloaded", timeout=60000)
@@ -435,7 +459,6 @@ class YouTubeUploader(BaseUploader):
                         page.wait_for_url("https://studio.youtube.com/**", timeout=LOGIN_TIMEOUT_SECONDS * 1000)
                     except Exception:
                         self.logger.error("YouTube 로그인 대기 시간이 초과되었습니다.")
-                        browser.close()
                         return False
 
                 self.logger.info("만들기 버튼 클릭 및 파일 업로드...")
@@ -498,7 +521,6 @@ class YouTubeUploader(BaseUploader):
 
                     if scheduled_at:
                         if not self._configure_native_schedule(page, scheduled_at):
-                            browser.close()
                             return False
                     else:
                         # 공개(Public) 라디오 버튼 클릭
@@ -511,7 +533,6 @@ class YouTubeUploader(BaseUploader):
                     if scheduled_at:
                         action_name = "예약"
                         if not self._click_final_schedule_button(page):
-                            browser.close()
                             return False
                     else:
                         action_name = "게시"
@@ -522,7 +543,6 @@ class YouTubeUploader(BaseUploader):
                             pass
                         if done_btn.count() == 0:
                             self.logger.error("YouTube 모달 하단의 게시 버튼을 찾지 못했어요.")
-                            browser.close()
                             return False
                         done_host = done_btn.last
                         inner_done_button = done_host.locator("button:visible")
@@ -549,7 +569,6 @@ class YouTubeUploader(BaseUploader):
                             page.wait_for_timeout(1000)
                         if not button_ready:
                             self.logger.error(f"YouTube [{action_name}] 버튼이 활성화되지 않았어요.")
-                            browser.close()
                             return False
 
                         click_target.scroll_into_view_if_needed()
@@ -577,7 +596,6 @@ class YouTubeUploader(BaseUploader):
                                     pass
                         if not clicked:
                             self.logger.error(f"YouTube [{action_name}] 버튼 클릭에 실패했어요.")
-                            browser.close()
                             return False
 
                     self.logger.info(f"{action_name} 버튼 클릭 완료! 서버 처리 및 링크 생성 대기 중 (최대 {upload_timeout}초)...")
@@ -605,7 +623,6 @@ class YouTubeUploader(BaseUploader):
 
                     if yt_done:
                         if not self._close_completion_dialog(page):
-                            browser.close()
                             return False
                         # 백그라운드 전송 유실 방지를 위한 파일 크기 비례 안전 대기
                         self.wait_with_countdown(
@@ -616,17 +633,15 @@ class YouTubeUploader(BaseUploader):
                         self.save_result_screenshot(
                             page, "scheduled" if scheduled_at else "uploaded"
                         )
-                        browser.close()
+                        browser_state["succeeded"] = True
                         return True
                     else:
                         self.logger.warning("YouTube 서버 처리 완료 확인을 받지 못했습니다.")
                         page.wait_for_timeout(5000)
-                        browser.close()
                         return False
 
                 self.logger.error("YouTube 업로드 input을 찾지 못했습니다.")
                 page.wait_for_timeout(5000)
-                browser.close()
                 return False
 
 

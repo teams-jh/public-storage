@@ -139,9 +139,11 @@ def _get_calendar_displayed_month(page) -> dict | None:
                 const style = window.getComputedStyle(el);
                 return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
             };
+            const youtubePickers = Array.from(document.querySelectorAll('ytcp-date-picker')).filter(isVisible);
+            const root = youtubePickers.length ? youtubePickers[youtubePickers.length - 1] : document;
 
             // 1. Next/Previous 버튼과 같은 컨테이너의 텍스트 탐색
-            const nextBtns = Array.from(document.querySelectorAll("button[aria-label*='Next' i], button[aria-label*='다음']")).filter(isVisible);
+            const nextBtns = Array.from(root.querySelectorAll("button[aria-label*='Next' i], button[aria-label*='다음']")).filter(isVisible);
             for (const btn of nextBtns) {
                 const parent = btn.parentElement;
                 if (parent) {
@@ -155,7 +157,7 @@ def _get_calendar_displayed_month(page) -> dict | None:
             }
 
             // 2. 전체 페이지 내 모든 span/div에서 'YYYY년 M월' 패턴 탐색
-            const allElements = Array.from(document.querySelectorAll("span, div")).filter(isVisible);
+            const allElements = Array.from(root.querySelectorAll("span, div")).filter(isVisible);
             for (const el of allElements) {
                 const txt = (el.textContent || '').trim();
                 const m = txt.match(/^(\d{4})년\s*(\d{1,2})월$/);
@@ -177,10 +179,104 @@ def _get_calendar_displayed_month(page) -> dict | None:
                 }
             }
 
+            // YouTube의 언어/날짜 형식에 따라 월과 연도의 순서가 달라져요.
+            for (const el of allElements) {
+                const txt = (el.textContent || '').trim();
+                const korean = txt.match(/^(\d{1,2})월\s*(\d{4})년?$/);
+                if (korean) return { year: Number(korean[2]), month: Number(korean[1]), text: txt };
+                const dotted = txt.match(/^(\d{4})\.\s*(\d{1,2})\.?$/);
+                if (dotted) return { year: Number(dotted[1]), month: Number(dotted[2]), text: txt };
+            }
+
             return null;
         }""")
     except Exception:
         return None
+
+
+def _scroll_youtube_calendar_to_month(page, scheduled_at: datetime, direction: int) -> bool:
+    """YouTube의 스크롤형 달력에서 목표 월 제목을 찾아 화면에 표시해요."""
+    for _ in range(24):
+        state = page.evaluate(r"""(target) => {
+            const calendars = Array.from(document.querySelectorAll('ytcp-scrollable-calendar'));
+            const root = calendars.filter(el => {
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            }).pop();
+            if (!root) return 'unavailable';
+
+            const monthName = new Intl.DateTimeFormat('en-US', {month: 'long'})
+                .format(new Date(target.year, target.month - 1, 1));
+            const shortMonthName = new Intl.DateTimeFormat('en-US', {month: 'short'})
+                .format(new Date(target.year, target.month - 1, 1));
+            const labels = [
+                `${target.year}년 ${target.month}월`,
+                `${target.month}월 ${target.year}년`,
+                `${target.month}월 ${target.year}`,
+                `${target.year}. ${target.month}.`,
+                `${monthName} ${target.year}`,
+                `${shortMonthName} ${target.year}`,
+            ];
+            const header = Array.from(root.querySelectorAll('.calendar-month-label'))
+                .find(el => labels.some(label => label.toLowerCase() === (el.textContent || '').trim().toLowerCase()));
+            if (header) {
+                header.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'instant'});
+                return 'found';
+            }
+
+            const listScrollTarget = root.querySelector('tp-yt-iron-list')?.scrollTarget;
+            const scrollables = [listScrollTarget, root, ...root.querySelectorAll('*')].filter(el => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                return /auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 5;
+            });
+            const scroller = (scrollables.includes(listScrollTarget) && listScrollTarget)
+                || scrollables.sort((a, b) =>
+                (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))[0];
+            if (!scroller) return 'unavailable';
+            const before = scroller.scrollTop;
+            scroller.scrollTop += Math.sign(target.direction) * Math.max(scroller.clientHeight * 0.8, 100);
+            scroller.dispatchEvent(new Event('scroll', {bubbles: true}));
+            return scroller.scrollTop === before ? 'end' : 'moved';
+        }""", {
+            "year": scheduled_at.year,
+            "month": scheduled_at.month,
+            "direction": direction,
+        })
+        if state == "found":
+            return True
+        if state != "moved":
+            return False
+        page.wait_for_timeout(200)
+    return False
+
+
+def _select_youtube_calendar_day(page, scheduled_at: datetime) -> bool:
+    """YouTube 가상 목록에서 목표 월의 활성 날짜 칸을 실제 마우스로 눌러요."""
+    month_text = f"{scheduled_at.year}년 {scheduled_at.month}월"
+    month = page.locator(
+        "ytcp-scrollable-calendar:visible "
+        f".calendar-month:has(> .calendar-month-label:text-is('{month_text}'))"
+    )
+    if month.count() == 0:
+        displayed_month = _get_calendar_displayed_month(page)
+        direction = 1 if displayed_month is None or (
+            scheduled_at.year, scheduled_at.month
+        ) >= (displayed_month["year"], displayed_month["month"]) else -1
+        if not _scroll_youtube_calendar_to_month(page, scheduled_at, direction):
+            return False
+
+    day = month.locator(
+        f"span.calendar-day:not(.disabled):not(.invisible):text-is('{scheduled_at.day}')"
+    )
+    try:
+        if day.count() != 1:
+            return False
+        day.scroll_into_view_if_needed()
+        day.click(timeout=3000)
+        return True
+    except Exception:
+        return False
 
 
 def _click_calendar_next_button(page) -> bool:
@@ -461,23 +557,45 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
             return False
 
     page.wait_for_timeout(400)
+    if page.locator("ytcp-scrollable-calendar:visible").count() > 0:
+        return _select_youtube_calendar_day(page, scheduled_at)
+
     # 달력이 켜진 후 달력 및 부모 스크롤 컨테이너를 아래로 스크롤하여 달력 전체 노출
     scroll_calendar_into_view(page)
 
+    # YouTube 달력에 Instagram용 월 이동을 먼저 적용하면 월이 중복으로 넘어갈 수 있어요.
+    youtube_picker = page.locator("ytcp-date-picker:visible")
+    is_youtube_calendar = youtube_picker.count() > 0
+
     # 1. Instagram role='grid' 구조 최적화 클릭 우선 시도
-    if _select_instagram_calendar_day(page, scheduled_at):
+    if not is_youtube_calendar and _select_instagram_calendar_day(page, scheduled_at):
         return True
 
     # 2. 범용 달력(YouTube Studio 등) fallback 로직
-    today = datetime.now()
-    month_steps = (scheduled_at.year - today.year) * 12 + scheduled_at.month - today.month
+    displayed_month = _get_calendar_displayed_month(page)
+    month_delta = (
+        (scheduled_at.year - displayed_month["year"]) * 12
+        + scheduled_at.month - displayed_month["month"]
+    ) if displayed_month else 0
+    youtube_month_found = is_youtube_calendar and (
+        (displayed_month is not None and month_delta == 0)
+        or _scroll_youtube_calendar_to_month(
+            page, scheduled_at, 1 if month_delta > 0 else -1
+        )
+    )
+    if displayed_month is None and not youtube_month_found:
+        return False
+    month_steps = 0 if youtube_month_found else month_delta
     direction_labels = (
-        ("다음 달", "Next month") if month_steps >= 0 else ("이전 달", "Previous month")
+        ("다음 달", "Next month") if month_steps >= 0
+        else ("이전 달", "지난달", "Previous month")
     )
     for _ in range(abs(month_steps)):
-        month_button = page.locator(
+        calendar_scope = youtube_picker.last if is_youtube_calendar else page
+        month_button = calendar_scope.locator(
             ", ".join(
-                f"button[aria-label*='{label}'], div[role='button'][aria-label*='{label}']"
+                f"button[aria-label*='{label}' i], div[role='button'][aria-label*='{label}' i], "
+                f"ytcp-icon-button[aria-label*='{label}' i]"
                 for label in direction_labels
             )
         )
@@ -485,10 +603,25 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
             return False
         month_button.last.scroll_into_view_if_needed()
         month_button.last.click(force=True)
-        page.wait_for_timeout(250)
+        previous_month = (displayed_month["year"], displayed_month["month"])
+        for _ in range(6):
+            page.wait_for_timeout(250)
+            displayed_month = _get_calendar_displayed_month(page)
+            if displayed_month and (
+                displayed_month["year"], displayed_month["month"]
+            ) != previous_month:
+                break
+        else:
+            return False
+
+    if not youtube_month_found and (displayed_month["year"], displayed_month["month"]) != (
+        scheduled_at.year, scheduled_at.month
+    ):
+        return False
 
     # 월 변경 후에도 달력 위치 스크롤 재보정
-    scroll_calendar_into_view(page)
+    if not youtube_month_found:
+        scroll_calendar_into_view(page)
 
     day_text = str(scheduled_at.day)
     try:
@@ -500,13 +633,19 @@ def choose_calendar_date(page, scheduled_at: datetime, picker_already_open: bool
             };
             const monthLabels = [
                 `${target.year}년 ${target.month}월`,
+                `${target.month}월 ${target.year}년`,
                 `${target.month}월 ${target.year}`,
                 `${target.year}-${String(target.month).padStart(2, '0')}`,
+                `${target.year}. ${target.month}.`,
+                new Intl.DateTimeFormat('en-US', {month: 'long'}).format(new Date(target.year, target.month - 1, 1)) + ` ${target.year}`,
+                new Intl.DateTimeFormat('en-US', {month: 'short'}).format(new Date(target.year, target.month - 1, 1)) + ` ${target.year}`,
             ];
-            const allElements = Array.from(document.querySelectorAll("div, span, button"));
+            const youtubePickers = Array.from(document.querySelectorAll('ytcp-date-picker')).filter(isVisible);
+            const root = youtubePickers.length ? youtubePickers[youtubePickers.length - 1] : document;
+            const allElements = Array.from(root.querySelectorAll("div, span, button"));
             const monthHeader = allElements.find(element => {
                 const text = element.textContent ? element.textContent.trim() : '';
-                return monthLabels.includes(text) && isVisible(element);
+                return monthLabels.some(label => label.toLowerCase() === text.toLowerCase()) && isVisible(element);
             });
             if (!monthHeader) return false;
 

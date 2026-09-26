@@ -10,7 +10,8 @@ from platforms.scheduling import (
 from config import (
     CONFIG, SESSION_DIR, TIKTOK_SCHEDULE_MAX_DAYS, TIKTOK_SCHEDULE_MIN_MINUTES,
     get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
-    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
+    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb,
+    UPLOAD_FAILURE_BROWSER_HOLD_SECONDS,
 )
 
 class TikTokUploader(BaseUploader):
@@ -249,28 +250,41 @@ class TikTokUploader(BaseUploader):
                 return False
 
         try:
+            if self._tiktok_date_matches(date_input.input_value(), scheduled_at):
+                self.logger.info(f"TikTok 예약 날짜가 이미 설정되어 있어요: {expected_value}")
+                return True
+
             date_input.click(force=True)
             surface.wait_for_timeout(300)
             date_set = self._select_tiktok_calendar_day(surface, scheduled_at)
-            surface.wait_for_timeout(500)
+            if date_set:
+                for _ in range(10):
+                    actual_val = date_input.input_value().strip()
+                    if self._tiktok_date_matches(actual_val, scheduled_at):
+                        self.logger.info(f"TikTok 예약 날짜 선택 완료: {actual_val}")
+                        return True
+                    surface.wait_for_timeout(200)
 
             actual_val = date_input.input_value().strip()
-            year_str = str(scheduled_at.year)
-            day_str = str(scheduled_at.day)
-
-            # 1) 달력에서 날짜 클릭이 성공했거나, 2) 기대값과 일치하거나, 3) 연도/일이 인풋에 포함된 경우 모두 인정
-            if date_set or actual_val == expected_value or (year_str in actual_val and day_str in actual_val):
-                self.logger.info(f"TikTok 예약 날짜 선택 완료: {actual_val or expected_value}")
-                return True
-
-            self.logger.warning(
-                f"TikTok 예약 날짜 검증 주의: 기대값({expected_value}), 실제값({actual_val})"
+            self.logger.error(
+                f"TikTok 예약 날짜가 입력되지 않았어요: 기대값 {expected_value}, 실제값 {actual_val or '빈 값'}"
             )
-            # 날짜 클릭 자체가 완료되었으면 계속 진행 허용
-            return bool(date_set)
+            return False
         except Exception as e:
             self.logger.warning(f"TikTok 날짜 선택 예외 발생: {e}")
             return False
+
+    @staticmethod
+    def _tiktok_date_matches(value: str, scheduled_at: datetime) -> bool:
+        """날짜 입력값의 연·월·일이 예약일과 정확히 같은지 확인해요."""
+        numbers = re.findall(r"\d+", value.strip())
+        return (
+            len(numbers) == 3
+            and len(numbers[0]) == 4
+            and tuple(map(int, numbers)) == (
+                scheduled_at.year, scheduled_at.month, scheduled_at.day
+            )
+        )
 
     def _select_tiktok_calendar_day(self, surface, scheduled_at: datetime) -> bool:
         """TikTok 전용 달력에서 현재 월의 정확한 날짜 칸을 선택해요."""
@@ -337,44 +351,32 @@ class TikTokUploader(BaseUploader):
         ):
             return False
 
-        # 1. 일요일부터 시작하는 7열 달력에서 목표 날짜의 칸 계산 후 클릭 시도
         day_str = str(scheduled_at.day)
-        first_day = datetime(scheduled_at.year, scheduled_at.month, 1)
-        sunday_based_offset = (first_day.weekday() + 1) % 7
-        cell_index = sunday_based_offset + scheduled_at.day - 1
-        day_cells = calendar.locator("span.day, div.day, [class*='day']")
-        
-        if cell_index < day_cells.count():
-            target_day = day_cells.nth(cell_index)
-            try:
-                class_name = target_day.get_attribute("class") or ""
-                if target_day.is_visible() and "disabled" not in class_name.lower():
-                    if target_day.inner_text().strip() == day_str:
-                        target_day.scroll_into_view_if_needed()
-                        target_day.click(force=True)
-                        surface.wait_for_timeout(300)
-                        return True
-            except Exception:
-                pass
+        day_cells = calendar.locator(
+            f".days-wrapper .day-span-container > span.day.valid:text-is('{day_str}')"
+        )
+        if day_cells.count() != 1:
+            self.logger.error(
+                f"TikTok {scheduled_at:%Y-%m-%d} 날짜 칸을 찾지 못했어요. "
+                "선택 가능한 날짜인지 확인해 주세요."
+            )
+            return False
 
-        # 2. 오프셋 불일치 시 달력 내의 해당 일자 텍스트를 가진 칸을 직접 탐색하여 클릭
+        cell = day_cells.first
         try:
-            for i in range(day_cells.count()):
-                cell = day_cells.nth(i)
-                if not cell.is_visible():
-                    continue
-                cls = cell.get_attribute("class") or ""
-                if "disabled" in cls.lower():
-                    continue
-                if cell.inner_text().strip() == day_str:
-                    cell.scroll_into_view_if_needed()
-                    cell.click(force=True)
-                    surface.wait_for_timeout(300)
-                    return True
-        except Exception:
-            pass
-
-        return False
+            cell.scroll_into_view_if_needed()
+            cell.click()
+            surface.wait_for_timeout(300)
+            return True
+        except Exception as error:
+            self.logger.warning(f"TikTok 날짜 칸 클릭을 다시 시도해요: {error}")
+            try:
+                cell.locator("xpath=..").click(force=True)
+                surface.wait_for_timeout(300)
+                return True
+            except Exception as retry_error:
+                self.logger.error(f"TikTok 날짜 칸을 누르지 못했어요: {retry_error}")
+                return False
 
     @staticmethod
     def _get_tiktok_calendar_month(calendar):
@@ -390,33 +392,14 @@ class TikTokUploader(BaseUploader):
         except Exception:
             return None
 
-    def _pause_on_issue(self, message: str, allow_continue: bool = False) -> bool:
-        """
-        이슈가 발생했을 때 브라우저가 즉시 종료되지 않도록 일시 정지하고
-        사용자가 화면을 직접 확인하고 조작할 수 있도록 대기해요.
-        """
+    def _pause_on_issue(self, message: str) -> bool:
+        """오류 화면을 1분 동안 표시하고 자동으로 작업을 중단해요."""
         self.logger.warning(f"⚠️ {message}")
-        print("\n" + "=" * 65)
-        print(" 🛑 [TikTok 업로드 일시 정지 - 이슈 감지]")
-        print(f" - 사유: {message}")
-        print(" 👉 브라우저 창을 확인하여 현재 상태를 점검해 주세요.")
-        if allow_continue:
-            print("   - [c] 또는 [y] 입력 후 Enter: 현재 브라우저 상태에서 계속 진행해요")
-            print("   - [Enter] (그냥 누름): 브라우저를 닫고 작업을 중단해요")
-            print("=" * 65)
-            try:
-                ans = input(" 👉 선택 입력 (c: 계속 진행 / Enter: 종료): ").strip().lower()
-                return ans in ["c", "continue", "y", "yes"]
-            except (EOFError, KeyboardInterrupt):
-                return False
-        else:
-            print(" 👉 확인 후 브라우저를 닫고 종료하려면 [Enter] 키를 눌러주세요...")
-            print("=" * 65)
-            try:
-                input(" 👉 [Enter] 키를 누르면 브라우저를 닫고 종료해요: ")
-            except (EOFError, KeyboardInterrupt):
-                pass
-            return False
+        self.logger.warning(
+            f"TikTok 브라우저를 {UPLOAD_FAILURE_BROWSER_HOLD_SECONDS}초 동안 유지한 뒤 닫아요."
+        )
+        time.sleep(UPLOAD_FAILURE_BROWSER_HOLD_SECONDS)
+        return False
 
     def _handle_tiktok_post_now_popup(self, page) -> bool:
         """
@@ -518,34 +501,6 @@ class TikTokUploader(BaseUploader):
             except Exception:
                 pass
 
-        return False
-
-    def _is_tiktok_schedule_button_ready(self, page) -> bool:
-        """하단 게시 버튼이 이미 [예약]으로 활성화되어 있는지 확인해요."""
-        for surface in [page, *page.frames]:
-            try:
-                is_ready = surface.evaluate(r"""() => {
-                    const btn = document.querySelector("button[data-e2e='post_video_button']");
-                    if (btn) {
-                        const text = (btn.textContent || '').trim();
-                        if (text.includes('예약') || text.includes('Schedule')) {
-                            return true;
-                        }
-                    }
-                    const allBtns = Array.from(document.querySelectorAll("button, [role='button']"));
-                    for (const b of allBtns) {
-                        const t = (b.textContent || '').trim();
-                        if (t === '예약' || t === 'Schedule' || t.includes('예약')) {
-                            const rect = b.getBoundingClientRect();
-                            if (rect.width > 0 && rect.height > 0) return true;
-                        }
-                    }
-                    return false;
-                }""")
-                if is_ready:
-                    return True
-            except Exception:
-                pass
         return False
 
     def upload(self, media_path: Path, metadata: dict) -> bool:
@@ -708,7 +663,7 @@ class TikTokUploader(BaseUploader):
 
                 if not file_input:
                     self.logger.warning("업로드 파일 선택 영역을 찾지 못했어요. 브라우저 창에서 로그인을 확인해 주세요.")
-                    self._pause_on_issue("업로드 파일 선택 영역을 찾지 못했어요. 로그인을 확인해 주세요.", allow_continue=False)
+                    self._pause_on_issue("업로드 파일 선택 영역을 찾지 못했어요. 로그인을 확인해 주세요.")
                     browser.close()
                     return False
 
@@ -898,19 +853,11 @@ class TikTokUploader(BaseUploader):
                 page.wait_for_timeout(2000)
 
                 if scheduled_at and not self._configure_native_schedule(page, scheduled_at):
-                    # 1) configure_native_schedule에서 실패했더라도, 실제 화면에 [예약] 버튼이 활성화되어 있는지 확인
-                    page.wait_for_timeout(1000)
-                    if self._is_tiktok_schedule_button_ready(page):
-                        self.logger.info("🎉 화면에 [예약] 버튼이 이미 활성화되어 있어 예약 설정을 정상 완료로 판정해요!")
-                    else:
-                        should_continue = self._pause_on_issue(
-                            "TikTok 예약 날짜 또는 시간을 설정하지 못했어요. 브라우저 창에서 직접 상태를 확인해 주세요.",
-                            allow_continue=True,
-                        )
-                        if not should_continue:
-                            browser.close()
-                            return False
-                        self.logger.info("수동 확인 후 다음 단계(예약 게시 버튼 탐색)를 계속 진행해요.")
+                    self._pause_on_issue(
+                        "TikTok 예약 날짜 또는 시간을 설정하지 못했어요. 브라우저에서 입력값을 확인해 주세요."
+                    )
+                    browser.close()
+                    return False
 
                 # 게시(Post) / 예약 버튼 정확히 찾기
                 post_btn = None
@@ -1092,12 +1039,12 @@ class TikTokUploader(BaseUploader):
                         return True
                     else:
                         self.logger.warning("TikTok 서버 전송 완료 확인을 받지 못했어요.")
-                        self._pause_on_issue("TikTok 서버 전송 완료 확인을 받지 못했어요.", allow_continue=False)
+                        self._pause_on_issue("TikTok 서버 전송 완료 확인을 받지 못했어요.")
                         browser.close()
                         return False
 
                 self.logger.error("게시 버튼을 찾지 못했어요.")
-                self._pause_on_issue("게시 버튼을 찾지 못했어요.", allow_continue=False)
+                self._pause_on_issue("게시 버튼을 찾지 못했어요.")
                 browser.close()
                 return False
 
