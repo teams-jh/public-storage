@@ -4,6 +4,7 @@ from platforms.x_twitter import TwitterXUploader
 from platforms.facebook import FacebookUploader
 from platforms.tiktok import TikTokUploader
 from platforms.youtube import YouTubeUploader
+from platforms.naver import NaverClipUploader
 
 __all__ = [
     "InstagramUploader",
@@ -12,4 +13,5 @@ __all__ = [
     "FacebookUploader",
     "TikTokUploader",
     "YouTubeUploader",
+    "NaverClipUploader",
 ]

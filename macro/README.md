@@ -1,6 +1,6 @@
 # 🚀 Multi-Platform SNS Media Uploader Macro
 
-`macro/upload/` 폴더 내의 미디어(동영상, 사진, GIF)와 `macro/input.txt`의 본문 내용을 바탕으로 **인스타그램(Instagram), 쓰레드(Threads), X(Twitter), 페이스북(Facebook), 틱톡(TikTok), 유튜브(YouTube)** 에 자동으로 게시물을 업로드하는 통합 Python 매크로입니다.
+`macro/upload/` 폴더 내의 미디어(동영상, 사진, GIF)와 `macro/input.txt`의 본문 내용을 바탕으로 **인스타그램(Instagram), 쓰레드(Threads), X(Twitter), 페이스북(Facebook), 틱톡(TikTok), 유튜브(YouTube), 네이버 클립(Naver Clip)** 에 자동으로 게시물을 업로드하는 통합 Python 매크로입니다.
 
 ---
 
@@ -21,7 +21,8 @@ macro/
 │   ├── x_twitter.py            # X (Twitter)
 │   ├── facebook.py             # 페이스북 (사진/피드/페이지/릴스)
 │   ├── tiktok.py               # 틱톡 (TikTok Studio)
-│   └── youtube.py              # 유튜브 (쇼츠/동영상 - 동영상 전용)
+│   ├── youtube.py              # 유튜브 (쇼츠/동영상 - 동영상 전용)
+│   └── naver.py                # 네이버 클립 (PC 웹 - 동영상 전용)
 └── sessions/                   # 💾 브라우저 쿠키 및 로그인 세션 저장소 (자동 생성)
 ```
 
@@ -89,6 +90,7 @@ playwright install chromium
 > - 예약 UI를 찾지 못하거나 플랫폼의 예약 가능 범위를 벗어나면 즉시 게시하지 않고 해당 플랫폼 업로드를 실패 처리해요.
 > - Instagram은 프로페셔널 계정에서 최대 75일 뒤까지 예약할 수 있어요.
 > - TikTok 웹 예약은 지원 계정의 동영상에 한해 15분~10일 뒤로 설정할 수 있어요.
+> - 네이버 클립 PC 웹 등록 예약은 최대 30일 뒤까지 설정할 수 있어요.
 
 ### 미디어 파일 배치
 업로드할 파일(`sample.mp4`, `image.jpg`, `animation.gif` 등)을 `macro/upload/` 폴더에 넣어둡니다.
@@ -124,6 +126,9 @@ TIKTOK_PASSWORD=your_tiktok_pw
 # YouTube
 # Google Cloud Console에서 다운로드한 OAuth 2.0 클라이언트 JSON 파일명
 YOUTUBE_CLIENT_SECRETS_FILE=client_secrets.json
+
+# Naver Clip (실제 업로드 폼의 1차>2차 카테고리 이름)
+NAVER_CLIP_CATEGORY=테크>IT, 컴퓨터
 ```
 
 > **💡 브라우저 세션 보존 기능:**
@@ -133,7 +138,7 @@ YOUTUBE_CLIENT_SECRETS_FILE=client_secrets.json
 
 ## 🏃 4. 실행 방법
 
-### 1) 6대 SNS 전체 일괄 업로드
+### 1) 전체 SNS 일괄 업로드
 ```bash
 python auto_upload.py
 ```
@@ -159,6 +164,9 @@ python auto_upload.py -p tiktok
 
 # 유튜브만 업로드
 python auto_upload.py -p youtube
+
+# 네이버 클립만 업로드 (동영상 전용)
+python auto_upload.py -p naver
 ```
 
 ### 3) 특정 미디어 파일(사진/GIF/동영상) 직접 지정
@@ -186,3 +194,4 @@ python auto_upload.py -v upload/my_special_video.mp4
 | **Facebook** | 동영상, 사진, GIF | Graph API / Playwright | 사진(`/photos`), 비디오(`/videos`) API 엔드포인트 분기 및 피드 자동 게시 |
 | **TikTok** | 동영상, 사진 | Playwright (TikTok Studio) | 틱톡 스튜디오를 통한 비디오 및 사진 모드 자동 게시 |
 | **YouTube** | 동영상 전용 | YouTube Data API v3 / Playwright | 쇼츠/동영상 업로드 (사진/GIF 감지 시 자동 스킵 안내) |
+| **Naver Clip** | 동영상 전용 | Playwright (클립 크리에이터 PC 웹) | 첫 번째 영상 커버를 선택하고 AI 활용 설정을 켜요. `[TIME]` 등록 예약은 목표 월로 이동해 날짜를 선택하고 저장한 뒤 시·분을 설정해요. 주요 조작마다 3초씩 멈추고, 등록 완료 화면에서는 10초 뒤 확인을 눌러 브라우저를 닫아요. |

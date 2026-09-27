@@ -27,6 +27,7 @@ from platforms import (
     FacebookUploader,
     TikTokUploader,
     YouTubeUploader,
+    NaverClipUploader,
 )
 
 PLATFORM_MAP = {
@@ -36,6 +37,7 @@ PLATFORM_MAP = {
     "facebook": FacebookUploader,
     "tiktok": TikTokUploader,
     "youtube": YouTubeUploader,
+    "naver": NaverClipUploader,
 }
 
 MEDIA_TYPE_NAMES = {
@@ -78,7 +80,7 @@ def main():
 
     parser.add_argument(
         "--platform", "-p",
-        choices=["all", "instagram", "threads", "x", "facebook", "tiktok", "youtube"],
+        choices=["all", "instagram", "threads", "x", "facebook", "tiktok", "youtube", "naver"],
         default="all",
         help="업로드할 대상 플랫폼 (기본값: all)"
     )
@@ -121,12 +123,14 @@ def main():
             print(f" 👉 동영상(.mp4, .mov 등), 사진(.jpg, .png 등), GIF(.gif) 파일을 '{UPLOAD_DIR}' 폴더에 넣고 다시 실행해 주세요.")
             sys.exit(1)
         target_media = media_list[0]
-        media_type = get_media_type(target_media)
-        media_type_name = MEDIA_TYPE_NAMES.get(media_type, "미디어")
-        print(f"\n🎬 [2] 업로드 대상 {media_type_name} 발견 ({len(media_list)}개 중 1번째 선택):")
+        print(f"\n🎬 [2] 업로드 대상 미디어 발견 ({len(media_list)}개 중 1번째 선택):")
         print(f" - 파일명: {target_media.name}")
-        print(f" - 미디어 종류: {media_type_name}")
         print(f" - 경로: {target_media.resolve()}")
+
+    # --file로 직접 지정한 경우에도 동영상 전용 플랫폼을 판별합니다.
+    media_type = get_media_type(target_media)
+    media_type_name = MEDIA_TYPE_NAMES.get(media_type, "미디어")
+    print(f" - 미디어 종류: {media_type_name}")
 
     # 3. 대상 플랫폼 선정
     if args.platform == "all":
@@ -149,9 +153,10 @@ def main():
             results["Facebook"] = "⏸️ 비활성화 (건너뜀)"
             continue
 
-        if plat_key == "youtube" and media_type != "video":
-            print(f"\n▶ [YouTube] ⚠️ YouTube는 동영상 전용 플랫폼입니다. 현재 파일({media_type_name})은 업로드를 건너뜁니다.")
-            results["YouTube"] = "⏭️ 건너뜀 (동영상 전용)"
+        if plat_key in ("youtube", "naver") and media_type != "video":
+            platform_name = "YouTube" if plat_key == "youtube" else "Naver Clip"
+            print(f"\n▶ [{platform_name}] ⚠️ {platform_name} 웹 업로드는 동영상 전용이에요. 현재 파일({media_type_name})은 건너뛰어요.")
+            results[platform_name] = "⏭️ 건너뜀 (동영상 전용)"
             continue
 
         uploader_cls = PLATFORM_MAP[plat_key]

@@ -53,6 +53,46 @@ TIKTOK_SCHEDULE_MIN_MINUTES = 15
 # 이 값보다 먼 시각은 TikTok에서 예약할 수 없어 즉시 게시 방지를 위해 실패 처리합니다.
 TIKTOK_SCHEDULE_MAX_DAYS = 10
 
+# 네이버 클립 PC 웹 본문의 최대 길이입니다. 단위는 글자 수이며, 늘려도 서비스의 입력 제한은 바뀌지 않습니다.
+NAVER_CLIP_MAX_BODY_LENGTH = 300
+
+# 네이버 클립 본문에 넣을 최대 해시태그 수입니다. 단위는 개이며, 초과 태그는 업로드에서 제외합니다.
+NAVER_CLIP_MAX_HASHTAGS = 5
+
+# 네이버 클립 등록 예약의 최대 범위입니다. 단위는 일이며, 초과 시 즉시 게시하지 않고 실패 처리합니다.
+NAVER_CLIP_SCHEDULE_MAX_DAYS = 30
+
+# 네이버 클립 필수 카테고리의 기본 1차·2차 이름입니다. 제공된 업로드 폼의
+# '테크 > IT, 컴퓨터' 추천 항목을 기본으로 사용하며, 다른 주제라면 .env에서 바꿔야 합니다.
+NAVER_CLIP_CATEGORY = os.getenv("NAVER_CLIP_CATEGORY", "테크>IT, 컴퓨터")
+
+# 네이버 클립 상세 정보의 AI 활용 설정을 켜는지 여부입니다. True이면 등록 전에 토글이 켜졌는지 확인합니다.
+NAVER_CLIP_AI_LABEL_ENABLED = True
+
+# 네이버 클립 크리에이터 PC 웹의 동영상 목록 주소입니다. 서비스 경로가 바뀌면 이 주소를 수정해야 합니다.
+NAVER_CLIP_URL = "https://clipcreators.naver.com/web/contents/clips"
+
+# 네이버 클립 화면에서 업로드 메뉴나 작성칸이 나타나기를 기다리는 시간입니다. 단위는 초입니다.
+# 값을 줄이면 느린 페이지에서 업로드가 일찍 실패할 수 있습니다.
+NAVER_CLIP_UI_TIMEOUT_SECONDS = 15
+
+# 네이버 클립 페이지 이동 대기 시간입니다. 단위는 초이며, 느린 접속에서는 늘려야 합니다.
+NAVER_CLIP_NAVIGATION_TIMEOUT_SECONDS = 60
+
+# 네이버 클립 업로드와 등록 상태를 확인하는 간격입니다. 단위는 ms이며, 줄이면 화면 검사 빈도가 늘어납니다.
+NAVER_CLIP_POLL_INTERVAL_MS = 1000
+
+# 네이버 클립의 주요 화면 조작을 눈으로 확인하도록 멈추는 시간입니다. 단위는 ms입니다.
+# 값을 늘리면 각 단계가 더 천천히 진행되고 전체 업로드 시간도 길어집니다.
+NAVER_CLIP_STEP_DELAY_MS = 3000
+
+# 네이버 클립의 '등록 완료' 팝업을 확인하기 전에 기다리는 시간입니다. 단위는 ms입니다.
+# 값을 늘리면 사용자가 완료 화면을 더 오래 확인할 수 있고 브라우저 종료도 늦어집니다.
+NAVER_CLIP_CONFIRM_DELAY_MS = 10000
+
+# 네이버 클립 결과 화면의 텍스트를 읽는 대기 시간입니다. 단위는 ms이며, 줄이면 느린 화면에서 실패할 수 있습니다.
+NAVER_CLIP_BODY_READ_TIMEOUT_MS = 5000
+
 # Instagram 게시물 작성 시 AI 생성 콘텐츠 레이블을 항상 활성화합니다.
 # 웹 작성 화면에서만 토글 상태를 검증할 수 있으므로 True이면 브라우저 업로드를 사용합니다.
 INSTAGRAM_AI_LABEL_ENABLED = True

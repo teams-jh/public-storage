@@ -143,6 +143,7 @@ def download_youtube_to_mp3(
 
     # 출력 폴더 생성
     output_dir.mkdir(parents=True, exist_ok=True)
+    archive_file = output_dir / ".download_archive.txt"
 
     # yt-dlp 옵션 설정
     ydl_opts = {
@@ -164,6 +165,13 @@ def download_youtube_to_mp3(
         "noplaylist": not allow_playlist,
         "quiet": False,
         "no_warnings": True,
+        "download_archive": str(archive_file),
+        "ignoreerrors": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"],
+            }
+        },
         "progress_hooks": [progress_hook],
     }
 
@@ -175,24 +183,21 @@ def download_youtube_to_mp3(
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # 동영상 정보 미리 조회
-            print("🔍 동영상 정보 확인 중...")
-            info = ydl.extract_info(url, download=False)
+            # download=True로 한 번에 추출 및 다운로드 진행 (이중 요청 방지 및 403 우회)
+            info = ydl.extract_info(url, download=True)
+            if not info:
+                print("ℹ️ 이미 다운로드된 영상이거나 건너뛴 영상입니다.")
+                return True
+
             title = info.get("title", "알 수 없는 제목")
             duration = info.get("duration", 0)
             mins, secs = divmod(duration, 60)
             uploader = info.get("uploader", "알 수 없음")
 
-            print(f"🎬 제목: {title}")
-            print(f"👤 채널: {uploader}")
-            print(f"⏱️ 길이: {mins}분 {secs}초")
-            print("--------------------------------------------------")
+            print(f"\n🎬 제목: {title}")
+            print(f"👤 채널: {uploader} | ⏱️ {mins}분 {secs}초")
 
-            # 다운로드 및 MP3 변환 진행
-            ydl.download([url])
-
-        print(f"\n✅ MP3 변환 및 다운로드가 완료되었어요!")
-        print(f"📂 파일 저장 위치: {output_dir.resolve()}\n")
+        print(f"✅ MP3 변환 및 다운로드가 완료되었어요!\n")
         return True
 
     except Exception as e:
@@ -209,6 +214,7 @@ def download_multiple_links(
 ) -> int:
     """
     여러 YouTube 링크를 순차적으로 다운로드합니다.
+    다운로드 완료 시마다 즉시 파일에 반영하여 언제든 중단 후 이어받기가 가능합니다.
     """
     total = len(urls)
     print(f"\n🚀 총 {total}개의 링크를 순차적으로 다운로드합니다.")
@@ -225,14 +231,13 @@ def download_multiple_links(
         )
         if success:
             successful_links.append(url)
+            # 한 곡 완료 시마다 즉시 link.txt에 완료 표시를 남겨 중단 시에도 이어받기 가능
+            if source_file:
+                mark_links_as_completed(source_file, [url])
 
     print("\n" + "=" * 55)
     print(f"✨ 작업 완료: 총 {total}개 중 {len(successful_links)}개 다운로드 성공!")
     print("=" * 55)
-
-    # 텍스트 파일로부터 불러왔을 경우, 다운로드 완료된 링크 주석 처리
-    if source_file and successful_links:
-        mark_links_as_completed(source_file, successful_links)
 
     return len(successful_links)
 
