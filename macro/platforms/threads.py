@@ -10,7 +10,7 @@ from platforms.scheduling import (
 from config import (
     CONFIG, FORCE_BROWSER_UPLOAD, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
     get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb,
-    THREADS_SYNC_BUFFER_DIVISOR,
+    THREADS_SYNC_BUFFER_DIVISOR, THREADS_RENDER_SKIP_POLL_MS,
 )
 
 class ThreadsUploader(BaseUploader):
@@ -676,6 +676,71 @@ class ThreadsUploader(BaseUploader):
         self.logger.error("Threads 새 게시물 작성창을 열지 못했어요. 피드에서는 아무것도 업로드하지 않아요.")
         return None
 
+    @staticmethod
+    def _threads_terminal_enter_pressed() -> bool:
+        """실행 터미널에서 Enter가 눌렸는지 확인해요 (Windows)."""
+        try:
+            import msvcrt
+
+            return msvcrt.kbhit() and msvcrt.getwch() in ("\r", "\n")
+        except (ImportError, OSError):
+            return False
+
+    def _wait_for_threads_media_render(self, page, total_seconds: int) -> None:
+        """렌더링 대기 중 브라우저나 터미널의 Enter로 다음 단계에 진행해요."""
+        stage = "Threads 미디어 파일 렌더링"
+        self.logger.info("렌더링 대기 중 Enter를 누르면 다음 단계로 넘어가요.")
+        self.log_wait_progress(stage, 0, total_seconds)
+
+        browser_listener_ready = False
+        try:
+            page.evaluate("""() => {
+                const state = { pressed: false };
+                state.handler = event => {
+                    if (event.key !== 'Enter') return;
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    state.pressed = true;
+                };
+                window.__threadsRenderSkipState = state;
+                window.addEventListener('keydown', state.handler, true);
+            }""")
+            browser_listener_ready = True
+        except Exception:
+            self.logger.warning("브라우저 Enter 감지를 켜지 못했어요. 터미널에서는 Enter를 누를 수 있어요.")
+
+        started_at = time.monotonic()
+        last_logged_second = 0
+        try:
+            while True:
+                browser_enter_pressed = False
+                if browser_listener_ready:
+                    try:
+                        browser_enter_pressed = page.evaluate(
+                            "() => Boolean(window.__threadsRenderSkipState?.pressed)"
+                        )
+                    except Exception:
+                        pass
+                if browser_enter_pressed or self._threads_terminal_enter_pressed():
+                    self.logger.info("Enter를 눌러 렌더링 대기를 건너뛰었어요.")
+                    return
+
+                elapsed_seconds = min(total_seconds, int(time.monotonic() - started_at))
+                if elapsed_seconds > last_logged_second:
+                    self.log_wait_progress(stage, elapsed_seconds, total_seconds)
+                    last_logged_second = elapsed_seconds
+                if elapsed_seconds >= total_seconds:
+                    return
+                page.wait_for_timeout(THREADS_RENDER_SKIP_POLL_MS)
+        finally:
+            if browser_listener_ready:
+                page.evaluate("""() => {
+                    const state = window.__threadsRenderSkipState;
+                    if (!state) return;
+                    window.removeEventListener('keydown', state.handler, true);
+                    delete window.__threadsRenderSkipState;
+                }""")
+
     def _maximize_threads_browser(self, page) -> None:
         """Threads 달력 전체가 보이도록 Chromium 창을 최대화해요."""
         self.maximize_browser(page)
@@ -830,9 +895,7 @@ class ThreadsUploader(BaseUploader):
                         file_input.first.set_input_files(str(media_path.resolve()))
                         # 미디어 처리 대기
                         render_wait = max(5, int(size_mb * 1.5)) if media_type == "video" else 3
-                        self.wait_with_countdown(
-                            page, render_wait, "Threads 미디어 파일 렌더링"
-                        )
+                        self._wait_for_threads_media_render(page, render_wait)
                     except Exception as e:
                         self.logger.warning(f"파일 첨부 실패: {e}")
 
