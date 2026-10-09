@@ -1,3 +1,4 @@
+import math
 import os
 import time
 from pathlib import Path
@@ -8,7 +9,8 @@ from platforms.scheduling import (
 )
 from config import (
     CONFIG, FORCE_BROWSER_UPLOAD, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
-    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
+    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb,
+    THREADS_SYNC_BUFFER_DIVISOR,
 )
 
 class ThreadsUploader(BaseUploader):
@@ -632,51 +634,41 @@ class ThreadsUploader(BaseUploader):
                 continue
         return None
 
+    @staticmethod
+    def _get_threads_new_thread_triggers(page):
+        """피드 게시글을 제외한 '새로운 스레드' 메뉴를 찾아요."""
+        candidates = []
+        for label in ("새로운 스레드", "New thread"):
+            triggers = page.get_by_text(label, exact=True)
+            for index in range(triggers.count()):
+                trigger = triggers.nth(index)
+                try:
+                    if not trigger.is_visible():
+                        continue
+                    unsafe_target = trigger.evaluate(r"""element => Boolean(
+                        element.closest('article, [role="article"], [role="dialog"]') ||
+                        element.closest('a[href*="/post/"], a[href*="/t/"]')
+                    )""")
+                    if not unsafe_target:
+                        candidates.append(trigger)
+                except Exception:
+                    continue
+        return candidates
+
     def _open_threads_composer(self, page):
-        """피드 게시글을 건드리지 않고 Threads 새 게시물 작성창을 열어요."""
+        """왼쪽 '새로운 스레드' 메뉴에서 작성창을 열어요."""
         composer = self._find_threads_composer(page)
         if composer is not None:
             return composer
 
-        create_triggers = page.locator(
-            "svg[aria-label='만들기'], svg[aria-label='Create']"
-        )
-        for index in range(create_triggers.count()):
-            trigger = create_triggers.nth(index)
+        for trigger in self._get_threads_new_thread_triggers(page):
             try:
-                if not trigger.is_visible():
-                    continue
-                click_target = trigger.locator(
-                    "xpath=ancestor-or-self::*[self::button or @role='button' or @tabindex='0'][1]"
-                )
-                if click_target.count() == 0:
-                    click_target = trigger
-                else:
-                    click_target = click_target.first
-
-                unsafe_target = click_target.evaluate(r"""element => Boolean(
-                    element.closest('article, [role="article"], div[role="dialog"]') ||
-                    element.closest('a[href*="/post/"], a[href*="/t/"]')
-                )""")
-                if unsafe_target:
-                    self.logger.warning("Threads 피드 게시글 안의 요소는 작성 버튼 후보에서 제외했어요.")
-                    continue
-
-                click_target.scroll_into_view_if_needed()
-                box = click_target.bounding_box()
-                if box:
-                    page.mouse.click(
-                        box["x"] + box["width"] / 2,
-                        box["y"] + box["height"] / 2,
-                    )
-                else:
-                    click_target.click(force=True)
-
+                trigger.click()
                 for _ in range(10):
                     page.wait_for_timeout(300)
                     composer = self._find_threads_composer(page)
                     if composer is not None:
-                        self.logger.info("Threads 새 게시물 작성창을 확인했어요.")
+                        self.logger.info("Threads 왼쪽 메뉴에서 새 게시물 작성창을 열었어요.")
                         return composer
             except Exception:
                 continue
@@ -747,7 +739,9 @@ class ThreadsUploader(BaseUploader):
             media_type = get_media_type(media_path)
             size_mb = get_media_size_mb(media_path)
             upload_timeout = get_dynamic_upload_timeout(media_path)
-            sync_buffer = get_dynamic_sync_buffer(media_path)
+            sync_buffer = math.ceil(
+                get_dynamic_sync_buffer(media_path) / THREADS_SYNC_BUFFER_DIVISOR
+            )
 
             self.logger.info(f"Threads 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 완료 후 세션유지: {sync_buffer}초)")
             with sync_playwright() as p:
@@ -772,6 +766,11 @@ class ThreadsUploader(BaseUploader):
                 logged_in = False
                 
                 for attempt in range(LOGIN_TIMEOUT_SECONDS // 5):  # 5초 * 36회 = 180초
+                    if self._find_threads_composer(page) is not None or self._get_threads_new_thread_triggers(page):
+                        logged_in = True
+                        self.logger.info("Threads 새로운 스레드 메뉴를 확인했어요. 작성창으로 진행해요.")
+                        break
+
                     self.log_wait_progress(
                         "Threads 로그인 대기", attempt * 5, LOGIN_TIMEOUT_SECONDS
                     )
@@ -818,8 +817,6 @@ class ThreadsUploader(BaseUploader):
                     return False
 
                 self.logger.info("새 스레드 작성 시작...")
-                page.wait_for_timeout(2000)
-                
                 composer = self._open_threads_composer(page)
                 if composer is None:
                     browser.close()
@@ -995,7 +992,7 @@ class ThreadsUploader(BaseUploader):
                         break
 
                 if post_done:
-                    # 미디어 크기에 비례하여 넉넉하게 세션 유지 후 정상 종료 (사진 20초, 동영상 30~180초)
+                    # Threads 전용 단축 세션 유지 후 정상 종료 (사진 4초, 동영상 약 6~36초)
                     self.wait_with_countdown(
                         page, sync_buffer, "Threads 업로드 세션 안전 동기화"
                     )
