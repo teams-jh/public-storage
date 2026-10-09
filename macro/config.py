@@ -35,6 +35,14 @@ UPLOAD_TIMEOUT_SECONDS = 180
 # 로그인 및 2단계 인증 대기 최대 시간 (초 단위: 180초 = 3분)
 LOGIN_TIMEOUT_SECONDS = 180
 
+# Threads 업로드 완료 후 세션 유지 시간을 공통 대기시간의 1/5로 줄입니다.
+# 단위는 배수이며, 값을 높이면 Threads 브라우저가 더 빨리 닫힙니다.
+THREADS_SYNC_BUFFER_DIVISOR = 5
+
+# Threads 미디어 렌더링 대기 중 Enter 입력을 확인하는 간격입니다. 단위는 ms입니다.
+# 값을 줄이면 입력 반응은 빨라지지만 브라우저와 터미널 검사 횟수가 늘어납니다.
+THREADS_RENDER_SKIP_POLL_MS = 200
+
 # 브라우저 업로드 실패 시 오류 화면을 확인할 수 있도록 창을 유지하는 시간입니다. 단위는 초입니다.
 UPLOAD_FAILURE_BROWSER_HOLD_SECONDS = 60
 
