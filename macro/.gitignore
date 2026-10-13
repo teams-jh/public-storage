@@ -47,6 +47,10 @@ sessions2/
 upload/*
 upload2/*
 !upload/.gitkeep
+upload_image/
+upload_image2/
+input_image.txt
+input_image2.txt
 
 # ==========================================
 # OS & Editor Files

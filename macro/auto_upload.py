@@ -31,13 +31,13 @@ from platforms import (
 )
 
 PLATFORM_MAP = {
+    "naver": NaverClipUploader,
     "instagram": InstagramUploader,
     "threads": ThreadsUploader,
     "x": TwitterXUploader,
     "facebook": FacebookUploader,
     "tiktok": TikTokUploader,
     "youtube": YouTubeUploader,
-    "naver": NaverClipUploader,
 }
 
 MEDIA_TYPE_NAMES = {
