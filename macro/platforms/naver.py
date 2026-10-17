@@ -3,7 +3,6 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 import re
-import time
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -27,6 +26,7 @@ from config import (
     get_dynamic_upload_timeout,
 )
 from platforms.base import BaseUploader
+from upload_pause import upload_monotonic
 from platforms.scheduling import (
     _get_calendar_displayed_month,
     choose_calendar_date,
@@ -103,9 +103,9 @@ class NaverClipUploader(BaseUploader):
             self.save_result_screenshot(page, "upload_menu_missing")
             return False
 
-        deadline = time.monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
+        deadline = upload_monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
         video_upload = None
-        while video_upload is None and time.monotonic() < deadline:
+        while video_upload is None and upload_monotonic() < deadline:
             video_upload = self._visible(video_menu)
             if video_upload is None:
                 page.wait_for_timeout(NAVER_CLIP_POLL_INTERVAL_MS)
@@ -190,16 +190,24 @@ class NaverClipUploader(BaseUploader):
         return True
 
     def _click_category_choice(self, page, name: str) -> bool:
-        deadline = time.monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
+        deadline = upload_monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
+        while upload_monotonic() < deadline:
             for candidate in (
                 page.get_by_role("option", name=name, exact=True),
                 page.get_by_role("menuitem", name=name, exact=True),
                 page.get_by_role("button", name=name, exact=True),
                 page.get_by_text(name, exact=True),
             ):
-                choice = self._visible(candidate)
-                if choice is not None:
+                for choice in candidate.all():
+                    if not choice.is_visible():
+                        continue
+                    # 같은 이름의 1차 선택값을 2차 목록 항목으로 잘못 누르지 않아요.
+                    if choice.evaluate("""element => Boolean(element.closest(
+                        "button[class*='ClipDetailForm_dropdownPrimary'], " +
+                        "button[class*='ClipDetailForm_dropdownSecondary'], " +
+                        "button[class*='ClipDetailForm_categoryTag']"
+                    ))"""):
+                        continue
                     choice.click()
                     return True
             page.wait_for_timeout(NAVER_CLIP_POLL_INTERVAL_MS)
@@ -213,8 +221,16 @@ class NaverClipUploader(BaseUploader):
             return False
         return not secondary or (second.count() > 0 and secondary in second.first.inner_text())
 
+    def _wait_category_selected(self, page, primary: str, secondary: str) -> bool:
+        deadline = upload_monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
+        while upload_monotonic() < deadline:
+            if self._category_selected(page, primary, secondary):
+                return True
+            page.wait_for_timeout(NAVER_CLIP_POLL_INTERVAL_MS)
+        return False
+
     def _select_category(self, page, category: str) -> bool:
-        primary, separator, secondary = category.partition(">")
+        primary, _, secondary = category.partition(">")
         primary = primary.strip()
         secondary = secondary.strip()
         if not primary:
@@ -231,11 +247,13 @@ class NaverClipUploader(BaseUploader):
                 or (not secondary and labels[-1].strip() == primary)
             ):
                 chip.click()
-                if self._category_selected(page, primary, secondary):
+                if self._wait_category_selected(page, primary, secondary):
                     self.logger.info(f"네이버 클립 추천 카테고리 [{category}]를 선택했어요.")
                     return True
 
-        first = self._visible(page.get_by_role("button", name="1차 카테고리", exact=True))
+        first = self._visible(page.locator("button[class*='ClipDetailForm_dropdownPrimary']"))
+        if first is None:
+            first = self._visible(page.get_by_role("button", name="1차 카테고리", exact=True))
         if first is None:
             self.logger.error("[1차 카테고리] 버튼을 찾지 못했어요.")
             return False
@@ -243,20 +261,28 @@ class NaverClipUploader(BaseUploader):
         if not self._click_category_choice(page, primary):
             self.logger.error(f"1차 카테고리 [{primary}]를 찾지 못했어요.")
             return False
+        if not self._wait_category_selected(page, primary, ""):
+            self.logger.error(f"1차 카테고리 [{primary}] 선택 결과를 확인하지 못했어요.")
+            return False
 
-        second = self._visible(page.get_by_role("button", name="2차 카테고리", exact=True))
-        if second is not None and second.is_enabled():
-            if not separator or not secondary:
-                self.logger.error(
-                    "2차 카테고리가 필요해요. NAVER_CLIP_CATEGORY를 "
-                    "'1차>2차' 형식으로 설정해 주세요."
-                )
+        if secondary:
+            deadline = upload_monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
+            second = None
+            while upload_monotonic() < deadline:
+                second = self._visible(page.locator("button[class*='ClipDetailForm_dropdownSecondary']"))
+                if second is None:
+                    second = self._visible(page.get_by_role("button", name="2차 카테고리", exact=True))
+                if second is not None and second.is_enabled():
+                    break
+                page.wait_for_timeout(NAVER_CLIP_POLL_INTERVAL_MS)
+            if second is None or not second.is_enabled():
+                self.logger.error(f"2차 카테고리 [{secondary}] 선택칸이 준비되지 않았어요.")
                 return False
             second.click()
             if not self._click_category_choice(page, secondary):
                 self.logger.error(f"2차 카테고리 [{secondary}]를 찾지 못했어요.")
                 return False
-        if not self._category_selected(page, primary, secondary):
+        if not self._wait_category_selected(page, primary, secondary):
             self.logger.error(f"카테고리 [{category}] 선택 결과를 확인하지 못했어요.")
             return False
         self.logger.info(f"네이버 클립 카테고리 [{category}]를 선택했어요.")
@@ -357,8 +383,8 @@ class NaverClipUploader(BaseUploader):
 
     def _save_schedule_date(self, page) -> bool:
         """달력에서 선택한 날짜를 저장해 예약 폼에 반영합니다."""
-        deadline = time.monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
+        deadline = upload_monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
+        while upload_monotonic() < deadline:
             save_button = self._visible(page.get_by_role("button", name="저장", exact=True))
             if save_button is not None and save_button.is_enabled() and (
                 save_button.get_attribute("aria-disabled") != "true"
@@ -469,10 +495,10 @@ class NaverClipUploader(BaseUploader):
         if button is None:
             self.logger.error("네이버 클립 등록 버튼을 찾지 못했어요.")
             return False
-        deadline = time.monotonic() + timeout_seconds
+        deadline = upload_monotonic() + timeout_seconds
         while (
             not button.is_enabled() or button.get_attribute("aria-disabled") == "true"
-        ) and time.monotonic() < deadline:
+        ) and upload_monotonic() < deadline:
             page.wait_for_timeout(NAVER_CLIP_POLL_INTERVAL_MS)
         if not button.is_enabled() or button.get_attribute("aria-disabled") == "true":
             self.logger.error("동영상 업로드를 기다렸지만 등록 버튼이 활성화되지 않았어요.")
@@ -482,8 +508,8 @@ class NaverClipUploader(BaseUploader):
         button.click()
         self.logger.info("등록 버튼을 눌렀어요. 완료 화면을 기다려요.")
 
-        deadline = time.monotonic() + timeout_seconds
-        while time.monotonic() < deadline:
+        deadline = upload_monotonic() + timeout_seconds
+        while upload_monotonic() < deadline:
             completion_title = self._visible(page.get_by_text("등록 완료", exact=True))
             if completion_title is not None:
                 confirm = self._visible(page.get_by_role("button", name="확인", exact=True))
@@ -535,8 +561,8 @@ class NaverClipUploader(BaseUploader):
 
                     video_input = page.locator("input[type='file']:not([accept*='image'])")
                     file_button = None
-                    deadline = time.monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
-                    while file_button is None and video_input.count() == 0 and time.monotonic() < deadline:
+                    deadline = upload_monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
+                    while file_button is None and video_input.count() == 0 and upload_monotonic() < deadline:
                         file_button = self._visible(
                             page.get_by_role("button", name="파일 선택", exact=True)
                         )
@@ -574,6 +600,7 @@ class NaverClipUploader(BaseUploader):
                         self.save_result_screenshot(page, "cover_failed")
                         return False
                     if not self._select_category(page, category):
+                        self.save_result_screenshot(page, "category_failed")
                         return False
                     self._pause(page, "카테고리 선택")
                     if not self._enable_ai_label(page):

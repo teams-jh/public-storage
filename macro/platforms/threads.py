@@ -1,9 +1,9 @@
 import math
 import os
-import time
 from pathlib import Path
 import requests
 from platforms.base import BaseUploader
+from upload_pause import upload_monotonic, upload_time
 from platforms.scheduling import (
     get_scheduled_at,
 )
@@ -176,7 +176,7 @@ class ThreadsUploader(BaseUploader):
 
     def _click_threads_menu_item(self, page, labels: list[str], max_wait_ms: int = 3000) -> bool:
         """보이는 Threads 메뉴/달력에서 정확한 문구의 클릭 요소를 찾아 누릅니다."""
-        start_time = time.time()
+        start_time = upload_time()
         timeout_seconds = max_wait_ms / 1000.0
         while True:
             try:
@@ -207,7 +207,7 @@ class ThreadsUploader(BaseUploader):
                     return True
             except Exception:
                 pass
-            if time.time() - start_time >= timeout_seconds:
+            if upload_time() - start_time >= timeout_seconds:
                 break
             page.wait_for_timeout(200)
         return False
@@ -709,7 +709,7 @@ class ThreadsUploader(BaseUploader):
         except Exception:
             self.logger.warning("브라우저 Enter 감지를 켜지 못했어요. 터미널에서는 Enter를 누를 수 있어요.")
 
-        started_at = time.monotonic()
+        started_at = upload_monotonic()
         last_logged_second = 0
         try:
             while True:
@@ -725,7 +725,7 @@ class ThreadsUploader(BaseUploader):
                     self.logger.info("Enter를 눌러 렌더링 대기를 건너뛰었어요.")
                     return
 
-                elapsed_seconds = min(total_seconds, int(time.monotonic() - started_at))
+                elapsed_seconds = min(total_seconds, int(upload_monotonic() - started_at))
                 if elapsed_seconds > last_logged_second:
                     self.log_wait_progress(stage, elapsed_seconds, total_seconds)
                     last_logged_second = elapsed_seconds

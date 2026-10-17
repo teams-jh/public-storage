@@ -70,9 +70,10 @@ NAVER_CLIP_MAX_HASHTAGS = 5
 # 네이버 클립 등록 예약의 최대 범위입니다. 단위는 일이며, 초과 시 즉시 게시하지 않고 실패 처리합니다.
 NAVER_CLIP_SCHEDULE_MAX_DAYS = 30
 
-# 네이버 클립 필수 카테고리의 기본 1차·2차 이름입니다. 제공된 업로드 폼의
-# '테크 > IT, 컴퓨터' 추천 항목을 기본으로 사용하며, 다른 주제라면 .env에서 바꿔야 합니다.
-NAVER_CLIP_CATEGORY = os.getenv("NAVER_CLIP_CATEGORY", "테크>IT, 컴퓨터")
+# 네이버 클립의 기본 1차·2차 카테고리 이름입니다. 단위는 카테고리 이름이며,
+# 기본값은 두 단계 모두 '유머'입니다. 값을 바꾸면 업로드 카테고리도 바뀌어요.
+# .env에서 다른 카테고리를 지정할 때는 '1차>2차' 형식으로 입력해요.
+NAVER_CLIP_CATEGORY = os.getenv("NAVER_CLIP_CATEGORY", "유머>유머")
 
 # 네이버 클립 상세 정보의 AI 활용 설정을 켜는지 여부입니다. True이면 등록 전에 토글이 켜졌는지 확인합니다.
 NAVER_CLIP_AI_LABEL_ENABLED = True
@@ -100,6 +101,25 @@ NAVER_CLIP_CONFIRM_DELAY_MS = 10000
 
 # 네이버 클립 결과 화면의 텍스트를 읽는 대기 시간입니다. 단위는 ms이며, 줄이면 느린 화면에서 실패할 수 있습니다.
 NAVER_CLIP_BODY_READ_TIMEOUT_MS = 5000
+
+# 업로드 중 ESC 단축키가 눌렸을 때의 Windows 가상 키 코드입니다. 단위는 Win32 키 코드이며,
+# 값을 바꾸면 일시정지·재개에 사용하는 키가 바뀝니다.
+UPLOAD_PAUSE_VIRTUAL_KEY = 0x1B
+
+# ESC를 길게 누를 때 일시정지 상태가 반복해서 바뀌지 않도록 하는 Win32 플래그입니다.
+# 단위는 비트 플래그이며, 제거하면 키 반복으로 상태가 여러 번 바뀔 수 있습니다.
+UPLOAD_PAUSE_NO_REPEAT_FLAG = 0x4000
+
+# 업로드 일시정지 단축키의 Win32 등록 ID입니다. 단위는 프로세스 내 식별자이며,
+# 같은 스레드에서 다른 단축키를 등록할 때 겹치지 않아야 합니다.
+UPLOAD_PAUSE_HOTKEY_ID = 1
+
+# Win32 단축키 입력 메시지 코드입니다. 단위는 메시지 ID이며, 바꾸면 ESC 입력을 인식하지 못합니다.
+UPLOAD_PAUSE_HOTKEY_MESSAGE = 0x0312
+
+# Win32 단축키 감시 스레드 종료 메시지 코드입니다. 단위는 메시지 ID이며,
+# 바꾸면 업로드가 끝난 뒤 ESC 단축키 등록이 해제되지 않을 수 있습니다.
+UPLOAD_PAUSE_QUIT_MESSAGE = 0x0012
 
 # Instagram 게시물 작성 시 AI 생성 콘텐츠 레이블을 항상 활성화합니다.
 # 웹 작성 화면에서만 토글 상태를 검증할 수 있으므로 True이면 브라우저 업로드를 사용합니다.

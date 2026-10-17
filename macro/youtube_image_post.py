@@ -1,12 +1,12 @@
 """기존 YouTube 브라우저 세션으로 이미지 게시글을 작성합니다."""
 
 import re
-import time
 from pathlib import Path
 
 from config import LOGIN_TIMEOUT_SECONDS, SESSION_DIR, UPLOAD_TIMEOUT_SECONDS
 from image_selection import set_and_verify_images
 from platforms.base import BaseUploader
+from upload_pause import upload_monotonic
 from platforms.scheduling import fill_native_date_time
 
 
@@ -27,8 +27,8 @@ class YouTubeImagePostUploader(BaseUploader):
         super().__init__("YouTube 게시글")
 
     def _wait_visible(self, page, selector: str, timeout_seconds: int):
-        deadline = time.monotonic() + timeout_seconds
-        while time.monotonic() < deadline:
+        deadline = upload_monotonic() + timeout_seconds
+        while upload_monotonic() < deadline:
             target = _visible(page.locator(selector))
             if target is not None:
                 return target
@@ -79,8 +79,8 @@ class YouTubeImagePostUploader(BaseUploader):
             raise RuntimeError("'게시물 작성' 메뉴를 찾지 못했어요. 채널의 게시글 사용 권한을 확인해 주세요.")
         create_post.click()
 
-        deadline = time.monotonic() + LOGIN_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
+        deadline = upload_monotonic() + LOGIN_TIMEOUT_SECONDS
+        while upload_monotonic() < deadline:
             composer = self._composer(page)
             if composer is not None:
                 return composer
@@ -155,8 +155,8 @@ class YouTubeImagePostUploader(BaseUploader):
         schedule_option.click()
 
         schedule_dialog = None
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and schedule_dialog is None:
+        deadline = upload_monotonic() + 10
+        while upload_monotonic() < deadline and schedule_dialog is None:
             dialogs = page.locator("[role='dialog'], tp-yt-paper-dialog")
             for index in reversed(range(dialogs.count())):
                 candidate = dialogs.nth(index)
@@ -180,8 +180,8 @@ class YouTubeImagePostUploader(BaseUploader):
         post_button = self._post_button(composer)
         if post_button is None:
             raise RuntimeError("게시글의 '게시' 버튼을 찾지 못했어요.")
-        deadline = time.monotonic() + UPLOAD_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
+        deadline = upload_monotonic() + UPLOAD_TIMEOUT_SECONDS
+        while upload_monotonic() < deadline:
             if post_button.is_enabled() and post_button.get_attribute("aria-disabled") != "true":
                 post_button.click()
                 return
@@ -228,8 +228,8 @@ class YouTubeImagePostUploader(BaseUploader):
                 else:
                     self._publish(page, composer)
 
-                deadline = time.monotonic() + UPLOAD_TIMEOUT_SECONDS
-                while time.monotonic() < deadline:
+                deadline = upload_monotonic() + UPLOAD_TIMEOUT_SECONDS
+                while upload_monotonic() < deadline:
                     if not composer.is_visible():
                         self.logger.info("YouTube 게시글 작성창이 닫혔어요.")
                         self.save_result_screenshot(page, "scheduled" if scheduled_at else "uploaded")

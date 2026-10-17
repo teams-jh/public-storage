@@ -29,6 +29,7 @@ from platforms import (
     YouTubeUploader,
     NaverClipUploader,
 )
+from upload_pause import pause_on_escape
 
 PLATFORM_MAP = {
     "naver": NaverClipUploader,
@@ -75,6 +76,7 @@ def print_banner():
     print(" (동영상 및 사진/이미지 파일 지원)")
     print("=" * 65)
 
+@pause_on_escape
 def main():
     parser = argparse.ArgumentParser(description="SNS 미디어(동영상/사진) 자동 업로드 매크로")
 

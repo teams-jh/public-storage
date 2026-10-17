@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import timezone
 from pathlib import Path
 from platforms.base import BaseUploader
+from upload_pause import upload_monotonic
 from platforms.scheduling import (
     choose_calendar_date,
     get_scheduled_at,
@@ -43,9 +44,9 @@ class YouTubeUploader(BaseUploader):
                     self.logger.warning(
                         f"YouTube 업로드가 실패했어요. 브라우저를 {UPLOAD_FAILURE_BROWSER_HOLD_SECONDS}초 동안 유지해요."
                     )
-                    deadline = time.monotonic() + UPLOAD_FAILURE_BROWSER_HOLD_SECONDS
+                    deadline = upload_monotonic() + UPLOAD_FAILURE_BROWSER_HOLD_SECONDS
                     while not browser.is_closed():
-                        remaining = deadline - time.monotonic()
+                        remaining = deadline - upload_monotonic()
                         if remaining <= 0:
                             break
                         time.sleep(min(1, remaining))

@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
+from upload_pause import pause_on_escape
+
 
 if sys.platform == "win32":
     for stream in (sys.stdout, sys.stderr):
@@ -74,6 +76,7 @@ def _upload_group(uploader, images: list[Path], metadata: dict) -> bool:
     return bool(uploaded)
 
 
+@pause_on_escape
 def run(input_file: Path, upload_dir: Path) -> int:
     """이미지 묶음을 선택한 플랫폼에 한 게시물씩 업로드합니다."""
     from config import parse_input_file

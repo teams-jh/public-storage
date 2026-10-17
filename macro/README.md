@@ -127,8 +127,8 @@ TIKTOK_PASSWORD=your_tiktok_pw
 # Google Cloud Console에서 다운로드한 OAuth 2.0 클라이언트 JSON 파일명
 YOUTUBE_CLIENT_SECRETS_FILE=client_secrets.json
 
-# Naver Clip (실제 업로드 폼의 1차>2차 카테고리 이름)
-NAVER_CLIP_CATEGORY=테크>IT, 컴퓨터
+# Naver Clip (기본 1차·2차 카테고리: 유머 > 유머)
+NAVER_CLIP_CATEGORY=유머>유머
 ```
 
 > **💡 브라우저 세션 보존 기능:**
@@ -181,6 +181,10 @@ python auto_upload.py -m upload/my_animation.gif
 # 동영상 파일 지정 업로드
 python auto_upload.py -v upload/my_special_video.mp4
 ```
+
+### 4) 업로드 일시정지 및 재개 (Windows)
+
+`auto_upload.py`, `auto_upload2.py`, `auto_image_upload.py`, `auto_image_upload2.py`를 실행하는 동안 ESC를 누르면 자동화가 잠시 멈춰요. 다시 ESC를 누르면 이어서 진행해요. 브라우저에 초점이 있어도 사용할 수 있어요. 이미 시작한 브라우저 동작이나 서버 전송은 끝난 뒤 멈추며, 일시정지한 시간은 업로드 대기 제한에서 제외해요.
 
 ---
 
