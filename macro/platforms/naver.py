@@ -362,39 +362,146 @@ class NaverClipUploader(BaseUploader):
         return True
 
     def _schedule_controls(self, page):
-        date_pattern = re.compile(r"^\s*\d{4}\.\d{1,2}\.\d{1,2}\s*$")
-        date_button = self._visible(
-            page.locator("button:visible").filter(has_text=date_pattern)
-        )
-        if date_button is None:
-            return None
-        for ancestor in ("xpath=..", "xpath=../..", "xpath=../../..", "xpath=../../../.."):
-            buttons = date_button.locator(ancestor).locator("button:visible").all()
-            for index, button in enumerate(buttons):
-                if not date_pattern.fullmatch(button.inner_text().strip()):
-                    continue
-                nearby = buttons[index + 1:index + 3]
-                if len(nearby) == 2 and all(
-                    re.fullmatch(r"\d{1,2}", item.inner_text().strip())
-                    for item in nearby
-                ):
-                    return button, nearby[0], nearby[1]
+        for date_button in page.locator("button:visible").all():
+            date_text = date_button.inner_text().strip()
+            numbers = re.findall(r"\d+", date_text)
+            if len(numbers) < 3 or len(numbers[0]) != 4:
+                continue
+            _, month, day = map(int, numbers[:3])
+            if not (1 <= month <= 12 and 1 <= day <= 31):
+                continue
+            for ancestor in ("xpath=..", "xpath=../..", "xpath=../../..", "xpath=../../../.."):
+                buttons = date_button.locator(ancestor).locator("button:visible").all()
+                for index, button in enumerate(buttons):
+                    if button.inner_text().strip() != date_text:
+                        continue
+                    nearby = buttons[index + 1:index + 3]
+                    if len(nearby) == 2 and all(
+                        re.fullmatch(r"\d{1,2}", item.inner_text().strip())
+                        for item in nearby
+                    ):
+                        return date_button, nearby[0], nearby[1]
         return None
 
-    def _save_schedule_date(self, page) -> bool:
-        """달력에서 선택한 날짜를 저장해 예약 폼에 반영합니다."""
+    def _wait_schedule_controls(self, page):
         deadline = upload_monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
         while upload_monotonic() < deadline:
+            buttons = self._schedule_controls(page)
+            if buttons is not None:
+                return buttons
+            page.wait_for_timeout(NAVER_CLIP_POLL_INTERVAL_MS)
+        return None
+
+    def _enable_schedule(self, page):
+        # 네이버 클립의 공개 설정에서 '공개 예약'을 선택해야 날짜 입력칸이 나타나요.
+        deadline = upload_monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
+        schedule_label = None
+        while upload_monotonic() < deadline:
+            schedule_label = self._visible(
+                page.locator("label").filter(has_text=re.compile(r"^\s*공개 예약(?:\s|$)"))
+            )
+            if schedule_label is not None:
+                break
+            page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+            page.wait_for_timeout(NAVER_CLIP_POLL_INTERVAL_MS)
+        if schedule_label is None:
+            self.logger.error("[공개 예약] 항목을 찾지 못했어요. 즉시 등록하지 않아요.")
+            return None
+        schedule_label.scroll_into_view_if_needed()
+        self._pause(page, "공개 예약 영역으로 스크롤")
+
+        control = schedule_label.locator("input[type='checkbox']")
+        if control.count() == 0:
+            self.logger.error("공개 예약 체크박스를 찾지 못했어요.")
+            return None
+        if not control.first.is_checked():
+            schedule_label.click()
+
+        self._pause(page, "공개 예약 켜기")
+        if not control.first.is_checked():
+            self.logger.error("공개 예약 체크박스가 선택되지 않았어요.")
+            return None
+        buttons = self._wait_schedule_controls(page)
+        if buttons is None:
+            self.logger.error("공개 예약을 켰지만 날짜·시·분 선택 버튼이 나타나지 않았어요.")
+        return buttons
+
+    def _select_naver_calendar_day(self, page, scheduled_at: datetime) -> bool:
+        """현재 표시된 네이버 달력에서 목표 날짜만 선택합니다."""
+        iso_date = scheduled_at.strftime("%Y-%m-%d")
+        korean_date = f"{scheduled_at.year}년 {scheduled_at.month}월 {scheduled_at.day}일"
+        dated_controls = page.locator(
+            f"[data-date='{iso_date}']:visible, [datetime^='{iso_date}']:visible, "
+            f"[aria-label*='{korean_date}']:visible"
+        )
+        for control in dated_controls.all():
+            if control.is_enabled() and control.get_attribute("aria-disabled") != "true":
+                control.click()
+                return True
+
+        return bool(page.evaluate(r"""target => {
+            const visible = element => {
+                const box = element.getBoundingClientRect();
+                const style = getComputedStyle(element);
+                return box.width > 0 && box.height > 0 &&
+                    style.display !== 'none' && style.visibility !== 'hidden';
+            };
+            const monthLabels = [
+                `${target.year}년${target.month}월`,
+                `${target.year}.${target.month}`,
+                `${target.year}.${target.month}.`
+            ];
+            const heading = Array.from(document.querySelectorAll('span, div, strong, button'))
+                .filter(visible)
+                .find(element => monthLabels.includes(
+                    (element.textContent || '').replace(/\s/g, '')
+                ));
+            if (!heading) return false;
+            const daySelector = "button, [role='gridcell'], [data-date], [tabindex]";
+            const dayControls = root => Array.from(root.querySelectorAll(daySelector))
+                .filter(element => /^(?:[1-9]|[12][0-9]|3[01])$/.test(
+                    (element.textContent || '').trim()
+                ));
+            const daysInMonth = new Date(target.year, target.month, 0).getDate();
+            let calendar = heading.parentElement;
+            while (calendar && calendar !== document.body &&
+                dayControls(calendar).length < daysInMonth) {
+                calendar = calendar.parentElement;
+            }
+            if (!calendar || calendar === document.body) return false;
+            const matches = dayControls(calendar).filter(element =>
+                visible(element) && (element.textContent || '').trim() === String(target.day) &&
+                !element.disabled && element.getAttribute('aria-disabled') !== 'true' &&
+                !/(outside|other.?month|disabled)/i.test(element.className || '')
+            );
+            if (matches.length !== 1) return false;
+            matches[0].click();
+            return true;
+        }""", {
+            "year": scheduled_at.year,
+            "month": scheduled_at.month,
+            "day": scheduled_at.day,
+        }))
+
+    def _save_schedule_date(self, page, scheduled_at: datetime) -> bool:
+        """달력에서 선택한 날짜를 저장해 예약 폼에 반영합니다."""
+        deadline = upload_monotonic() + NAVER_CLIP_UI_TIMEOUT_SECONDS
+        save_clicked = False
+        while upload_monotonic() < deadline:
             save_button = self._visible(page.get_by_role("button", name="저장", exact=True))
-            if save_button is not None and save_button.is_enabled() and (
+            if not save_clicked and save_button is not None and save_button.is_enabled() and (
                 save_button.get_attribute("aria-disabled") != "true"
             ):
                 save_button.click()
+                save_clicked = True
                 self._pause(page, "예약 날짜 저장")
-                self.logger.info("선택한 예약 날짜를 저장했어요.")
+                continue
+            buttons = self._schedule_controls(page)
+            if buttons is not None and self._date_matches(buttons[0].inner_text(), scheduled_at):
+                self.logger.info("선택한 예약 날짜가 반영됐어요.")
                 return True
             page.wait_for_timeout(NAVER_CLIP_POLL_INTERVAL_MS)
-        self.logger.error("예약 달력의 [저장] 버튼을 누르지 못했어요. 즉시 등록하지 않아요.")
+        self.logger.error("선택한 예약 날짜가 입력칸에 반영되지 않았어요. 즉시 등록하지 않아요.")
         return False
 
     def _select_schedule_time(self, page, position: int, value: str, label: str) -> bool:
@@ -432,30 +539,11 @@ class NaverClipUploader(BaseUploader):
 
     def _set_schedule(self, page, scheduled_at: datetime) -> bool:
         if scheduled_at <= datetime.now() or scheduled_at - datetime.now() > timedelta(days=NAVER_CLIP_SCHEDULE_MAX_DAYS):
-            self.logger.error(f"네이버 클립 등록 예약은 현재부터 {NAVER_CLIP_SCHEDULE_MAX_DAYS}일 이내만 가능해요.")
+            self.logger.error(f"네이버 클립 공개 예약은 현재부터 {NAVER_CLIP_SCHEDULE_MAX_DAYS}일 이내만 가능해요.")
             return False
 
-        schedule_label = self._visible(page.locator("label:has-text('등록 예약')"))
-        if schedule_label is None:
-            self.logger.error("[등록 예약] 항목을 찾지 못했어요. 즉시 등록하지 않아요.")
-            return False
-        schedule_label.scroll_into_view_if_needed()
-        self._pause(page, "등록 예약 영역으로 스크롤")
-
-        control = schedule_label.locator("input[type='checkbox']")
-        if control.count() == 0:
-            self.logger.error("등록 예약 체크박스를 찾지 못했어요.")
-            return False
-        if not control.first.is_checked():
-            schedule_label.click()
-        self._pause(page, "등록 예약 켜기")
-        if not control.first.is_checked():
-            self.logger.error("등록 예약 체크박스가 선택되지 않았어요.")
-            return False
-
-        buttons = self._schedule_controls(page)
+        buttons = self._enable_schedule(page)
         if buttons is None:
-            self.logger.error("등록 예약 후 날짜·시·분 선택 버튼이 나타나지 않았어요.")
             return False
         date_button = buttons[0]
         if not self._date_matches(date_button.inner_text(), scheduled_at):
@@ -463,11 +551,14 @@ class NaverClipUploader(BaseUploader):
             self._pause(page, "예약 날짜 달력 열기")
             if not self._advance_calendar_month(page, scheduled_at):
                 return False
-            if not choose_calendar_date(page, scheduled_at, picker_already_open=True):
+            if not (
+                self._select_naver_calendar_day(page, scheduled_at)
+                or choose_calendar_date(page, scheduled_at, picker_already_open=True)
+            ):
                 self.logger.error("예약 달력에서 날짜를 선택하지 못했어요. 즉시 등록하지 않아요.")
                 return False
             self._pause(page, "예약 날짜 선택")
-            if not self._save_schedule_date(page):
+            if not self._save_schedule_date(page, scheduled_at):
                 return False
         buttons = self._schedule_controls(page)
         if buttons is None or not self._date_matches(buttons[0].inner_text(), scheduled_at):
@@ -480,7 +571,7 @@ class NaverClipUploader(BaseUploader):
         if not self._select_schedule_time(page, 2, f"{scheduled_at.minute:02d}", "분"):
             self.logger.error("예약 시각의 분을 선택하지 못했어요. 즉시 등록하지 않아요.")
             return False
-        self.logger.info(f"네이버 클립 등록 예약 시각: {scheduled_at:%Y-%m-%d %H:%M}")
+        self.logger.info(f"네이버 클립 공개 예약 시각: {scheduled_at:%Y-%m-%d %H:%M}")
         return True
 
     def _submit(self, page, scheduled_at: datetime | None, timeout_seconds: int) -> bool:
