@@ -48,13 +48,12 @@ class TikTokUploader(BaseUploader):
                 return False
 
             date_set = self._select_tiktok_schedule_date(surface, picker, scheduled_at)
+            if not date_set:
+                self.logger.error("TikTok 예약 달력에서 날짜를 선택하지 못했어요. 시간을 변경하지 않고 중단해요.")
+                return False
             time_set = self._select_tiktok_schedule_time(surface, picker, scheduled_at)
-            if not date_set or not time_set:
-                if not time_set:
-                    self.logger.error("TikTok 예약 시간 목록에서 일치하는 시간을 찾지 못했거나 설정하지 못했어요.")
-                if not date_set:
-                    self.logger.error("TikTok 예약 달력에서 날짜를 선택하지 못했거나 입력값이 일치하지 않아요.")
-                self.logger.error("TikTok 예약 날짜 또는 시간을 입력하지 못했어요. 즉시 게시하지 않고 중단해요.")
+            if not time_set:
+                self.logger.error("TikTok 예약 시간을 설정하지 못했어요. 즉시 게시하지 않고 중단해요.")
                 return False
 
             self.logger.info(f"TikTok 자체 예약 설정 완료: {scheduled_at:%Y-%m-%d %H:%M}")
@@ -293,9 +292,13 @@ class TikTokUploader(BaseUploader):
         if self._tiktok_date_matches(self._tiktok_control_value(trigger), scheduled_at):
             return True
         trigger.click()
+        surface.wait_for_timeout(200)
+        date_set = False
         if surface.locator("div.calendar-wrapper:visible").count():
             date_set = self._select_tiktok_calendar_day(surface, scheduled_at)
-        else:
+        if not date_set:
+            date_set = self._select_tiktok_calendar_day_by_layout(surface, scheduled_at)
+        if not date_set:
             date_set = choose_calendar_date(surface, scheduled_at, picker_already_open=True)
         if not date_set:
             return False
@@ -308,6 +311,122 @@ class TikTokUploader(BaseUploader):
                 return True
             surface.wait_for_timeout(200)
         return False
+
+    def _select_tiktok_calendar_day_by_layout(self, surface, scheduled_at: datetime) -> bool:
+        """새 달력의 월·연도 제목과 일요일 시작 날짜 격자를 기준으로 선택해요."""
+        calendar_action = r"""({action, day, direction}) => {
+            const visible = element => {
+                const rect = element.getBoundingClientRect();
+                const style = getComputedStyle(element);
+                return rect.width > 0 && rect.height > 0 &&
+                    style.display !== 'none' && style.visibility !== 'hidden';
+            };
+            const label = element => (element.textContent || '').replace(/\s+/g, ' ').trim();
+            const numericDays = root => Array.from(root.querySelectorAll(
+                'button, [role="gridcell"], span, div'
+            )).filter(element => {
+                if (!visible(element) || !/^(?:[1-9]|[12][0-9]|3[01])$/.test(label(element))) {
+                    return false;
+                }
+                return !Array.from(element.children).some(child => label(child) === label(element));
+            }).sort((a, b) => {
+                const left = a.getBoundingClientRect();
+                const right = b.getBoundingClientRect();
+                return Math.round(left.top) - Math.round(right.top) || left.left - right.left;
+            });
+            const headings = Array.from(document.querySelectorAll('span, div, button'))
+                .filter(element => visible(element) &&
+                    /^(?:\d{1,2}월|\d{1,2}월\s*\d{4}년?)$/.test(label(element)))
+                .sort((a, b) => {
+                    const left = a.getBoundingClientRect();
+                    const right = b.getBoundingClientRect();
+                    return left.width * left.height - right.width * right.height;
+                });
+            let calendar = null;
+            for (const heading of headings) {
+                const month = Number(label(heading).match(/^(\d{1,2})월/)[1]);
+                for (let root = heading.parentElement; root && root !== document.body;
+                     root = root.parentElement) {
+                    const combined = label(heading).match(/^\d{1,2}월\s*(\d{4})년?$/);
+                    const yearElement = Array.from(root.querySelectorAll('span, div, button'))
+                        .find(element => visible(element) && /^\d{4}$/.test(label(element)));
+                    const year = Number(combined?.[1] || (yearElement && label(yearElement)));
+                    if (!year || numericDays(root).length < new Date(year, month, 0).getDate()) {
+                        continue;
+                    }
+                    calendar = {root, heading, year, month, days: numericDays(root)};
+                    break;
+                }
+                if (calendar) break;
+            }
+            if (!calendar) return {status: 'missing'};
+            const {root, heading, year, month, days} = calendar;
+            if (action === 'state') return {status: 'found', year, month};
+            if (action === 'move') {
+                const title = heading.getBoundingClientRect();
+                const titleY = title.top + title.height / 2;
+                const arrows = Array.from(root.querySelectorAll(
+                    'button, [role="button"], svg, [class*="arrow" i]'
+                )).filter(element => {
+                    if (!visible(element)) return false;
+                    const text = label(element);
+                    const icon = element.matches('svg, [class*="arrow" i]') ||
+                        element.querySelector('svg, [class*="arrow" i]') ||
+                        /^[<>‹›]$/.test(text);
+                    if (!icon) return false;
+                    const rect = element.getBoundingClientRect();
+                    const x = rect.left + rect.width / 2;
+                    const y = rect.top + rect.height / 2;
+                    return Math.abs(y - titleY) <= Math.max(title.height, rect.height) * 2 &&
+                        (direction > 0 ? x > title.right : x < title.left);
+                }).sort((a, b) => {
+                    const ax = a.getBoundingClientRect().left;
+                    const bx = b.getBoundingClientRect().left;
+                    return direction > 0 ? ax - bx : bx - ax;
+                });
+                if (!arrows.length) return {status: 'arrow-missing', year, month};
+                const arrow = arrows[0].closest('button, [role="button"]') || arrows[0];
+                arrow.click();
+                return {status: 'moved', year, month};
+            }
+            const index = new Date(year, month - 1, 1).getDay() + day - 1;
+            const cell = days[index];
+            if (!cell || label(cell) !== String(day) || cell.closest('[disabled], [aria-disabled="true"]')) {
+                return {status: 'day-missing', year, month};
+            }
+            (cell.closest('button, [role="gridcell"], [role="button"]') || cell).click();
+            return {status: 'clicked', year, month};
+        }"""
+
+        state = surface.evaluate(calendar_action, {"action": "state"})
+        if state.get("status") != "found":
+            return False
+        current_index = state["year"] * 12 + state["month"] - 1
+        target_index = scheduled_at.year * 12 + scheduled_at.month - 1
+        direction = 1 if target_index > current_index else -1
+        for expected_index in range(current_index + direction, target_index + direction, direction):
+            moved = surface.evaluate(calendar_action, {"action": "move", "direction": direction})
+            if moved.get("status") != "moved":
+                self.logger.error("TikTok 새 달력의 월 이동 화살표를 찾지 못했어요.")
+                return False
+            for _ in range(10):
+                surface.wait_for_timeout(200)
+                state = surface.evaluate(calendar_action, {"action": "state"})
+                if state.get("status") == "found" and (
+                    state["year"] * 12 + state["month"] - 1 == expected_index
+                ):
+                    break
+            else:
+                self.logger.error("TikTok 달력이 요청한 달로 이동하지 않았어요.")
+                return False
+
+        result = surface.evaluate(calendar_action, {
+            "action": "day", "day": scheduled_at.day,
+        })
+        if result.get("status") != "clicked":
+            self.logger.error(f"TikTok 달력에서 {scheduled_at:%Y-%m-%d} 날짜 칸을 찾지 못했어요.")
+            return False
+        return True
 
     def _select_tiktok_schedule_time(self, surface, picker, scheduled_at: datetime) -> bool:
         """TikTok의 24시간제 시·분 목록에서 예약 시간을 선택해요."""
@@ -392,9 +511,12 @@ class TikTokUploader(BaseUploader):
 
             date_input.click(force=True)
             surface.wait_for_timeout(300)
+            date_set = False
             if surface.locator("div.calendar-wrapper:visible").count():
                 date_set = self._select_tiktok_calendar_day(surface, scheduled_at)
-            else:
+            if not date_set:
+                date_set = self._select_tiktok_calendar_day_by_layout(surface, scheduled_at)
+            if not date_set:
                 date_set = choose_calendar_date(surface, scheduled_at, picker_already_open=True)
             if date_set:
                 for _ in range(10):
