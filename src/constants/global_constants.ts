@@ -121,3 +121,32 @@ export const LOTTO_REQUEST_RETRY_DELAY_MS = 1_000;
 /** 동행복권 API 요청에 사용하는 User-Agent 값. 변경하면 사이트에서 요청을 식별하는 방식이 달라질 수 있어요. */
 export const LOTTO_REQUEST_USER_AGENT =
   "public-storage-lotto-updater/1.0 (+https://github.com/teams-jh/public-storage)";
+
+// ============================================================================
+// 6. MP3 및 이미지의 MP4 변환 설정
+// ============================================================================
+
+/**
+ * macro/make_mp4의 오디오 반복 종료 기준 (단위: 초).
+ * 완성 영상은 이 길이와 같아도 부족하며 반드시 초과해야 해요.
+ * 값을 늘리면 MP3 반복 횟수와 출력 MP4 크기 및 변환 시간이 함께 늘어나요.
+ */
+export const MAKE_MP4_MIN_DURATION_SECONDS = 3600;
+
+/**
+ * FFmpeg가 MP3 길이를 소수점 둘째 자리까지 표시할 때의 최대 반올림 오차 (단위: 초).
+ * 이 값을 줄이면 한 시간 경계에 가까운 파일의 반복 횟수가 부족해질 수 있어요.
+ */
+export const MAKE_MP4_DURATION_ROUNDING_SECONDS = 0.005;
+
+/**
+ * macro/make_mp4의 정지 이미지 영상 프레임 빈도 (단위: 초당 프레임).
+ * 값을 늘리면 MP4 인코딩 시간과 파일 크기가 늘어나요.
+ */
+export const MAKE_MP4_VIDEO_FPS = 1;
+
+/**
+ * macro/make_mp4의 AAC 오디오 비트레이트 (단위: kbps).
+ * 값을 늘리면 음질과 출력 파일 크기가 함께 늘어나요.
+ */
+export const MAKE_MP4_AUDIO_BITRATE_KBPS = 192;
