@@ -108,6 +108,7 @@ def main() -> int:
     args = parser.parse_args()
 
     folder = Path(__file__).resolve().parent
+    result_folder = folder / "result"
     pairs = list(matching_pairs(folder))
     if not pairs:
         print("이름이 같은 MP3와 PNG/JPG 파일이 없어요.")
@@ -119,13 +120,15 @@ def main() -> int:
         fps = int(global_number("MAKE_MP4_VIDEO_FPS"))
         bitrate = int(global_number("MAKE_MP4_AUDIO_BITRATE_KBPS"))
         ffmpeg = find_ffmpeg()
+        if not args.dry_run:
+            result_folder.mkdir(exist_ok=True)
     except (OSError, ValueError, RuntimeError) as exc:
         print(exc, file=sys.stderr)
         return 1
 
     failed = False
     for mp3, image in pairs:
-        output = mp3.with_suffix(".mp4")
+        output = result_folder / f"{mp3.stem}.mp4"
         if output.exists():
             print(f"건너뛰어요 (이미 있음): {output.name}")
             continue

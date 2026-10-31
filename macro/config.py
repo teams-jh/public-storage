@@ -214,7 +214,12 @@ def parse_input_file(filepath: Path = INPUT_FILE) -> dict:
             "full_caption": ""
         }
     
-    raw_text = filepath.read_text(encoding="utf-8").strip()
+    return parse_input_text(filepath.read_text(encoding="utf-8-sig"))
+
+
+def parse_input_text(raw_text: str) -> dict:
+    """한 게시물의 텍스트를 기존 단일 업로드와 같은 메타데이터로 변환해요."""
+    raw_text = raw_text.strip()
     
     title = ""
     content = ""

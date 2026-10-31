@@ -17,9 +17,10 @@ from config import (
 )
 
 class YouTubeUploader(BaseUploader):
-    def __init__(self):
+    def __init__(self, completion_wait_seconds=None):
         super().__init__("YouTube")
         self.client_secrets_file = CONFIG.get("YOUTUBE_CLIENT_SECRETS_FILE")
+        self.completion_wait_seconds = completion_wait_seconds
 
     @contextmanager
     def _browser_upload_session(self, user_data_dir):
@@ -325,6 +326,22 @@ class YouTubeUploader(BaseUploader):
         self.logger.info("YouTube 처리 완료 모달 [닫기] 버튼 클릭 완료")
         return True
 
+    def _finish_browser_upload(self, page, browser_state, video_path, scheduled_at) -> bool:
+        """완료 모달을 닫은 뒤 지정된 시간만 기다리고 업로드를 마쳐요."""
+        if not self._close_completion_dialog(page):
+            return False
+        sync_buffer = (
+            self.completion_wait_seconds
+            if self.completion_wait_seconds is not None
+            else get_dynamic_sync_buffer(video_path)
+        )
+        self.wait_with_countdown(page, sync_buffer, "YouTube 업로드 완료 후 대기")
+        result_name = "예약 업로드" if scheduled_at else "업로드"
+        self.logger.info(f"🎉 YouTube 최종 {result_name} 완료!")
+        self.save_result_screenshot(page, "scheduled" if scheduled_at else "uploaded")
+        browser_state["succeeded"] = True
+        return True
+
     def upload(self, media_path: Path, metadata: dict) -> bool:
         """
         YouTube 동영상 / 쇼츠 업로드
@@ -443,9 +460,7 @@ class YouTubeUploader(BaseUploader):
 
             size_mb = get_media_size_mb(video_path)
             upload_timeout = get_dynamic_upload_timeout(video_path)
-            sync_buffer = get_dynamic_sync_buffer(video_path)
-
-            self.logger.info(f"YouTube Studio 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 완료 후 세션유지: {sync_buffer}초)")
+            self.logger.info(f"YouTube Studio 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초)")
             with self._browser_upload_session(user_data_dir) as (browser, browser_state):
                 page = browser.new_page()
                 self.maximize_browser(page)
@@ -623,19 +638,9 @@ class YouTubeUploader(BaseUploader):
                             break
 
                     if yt_done:
-                        if not self._close_completion_dialog(page):
-                            return False
-                        # 백그라운드 전송 유실 방지를 위한 파일 크기 비례 안전 대기
-                        self.wait_with_countdown(
-                            page, sync_buffer, "YouTube 업로드 세션 안전 동기화"
+                        return self._finish_browser_upload(
+                            page, browser_state, video_path, scheduled_at
                         )
-                        result_name = "예약 업로드" if scheduled_at else "업로드"
-                        self.logger.info(f"🎉 YouTube 최종 {result_name} 완료!")
-                        self.save_result_screenshot(
-                            page, "scheduled" if scheduled_at else "uploaded"
-                        )
-                        browser_state["succeeded"] = True
-                        return True
                     else:
                         self.logger.warning("YouTube 서버 처리 완료 확인을 받지 못했습니다.")
                         page.wait_for_timeout(5000)

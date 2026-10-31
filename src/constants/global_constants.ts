@@ -150,3 +150,76 @@ export const MAKE_MP4_VIDEO_FPS = 1;
  * 값을 늘리면 음질과 출력 파일 크기가 함께 늘어나요.
  */
 export const MAKE_MP4_AUDIO_BITRATE_KBPS = 192;
+
+/**
+ * 유튜브 일괄 업로드의 파일 경로·입력 형식 설정 (단위: 경로/문자열).
+ * 경로는 macro 폴더 기준이며, 바꾸면 읽을 입력 파일과 영상 폴더가 바뀌어요.
+ * sections는 게시물마다 필요한 태그 순서이고 separator는 게시물 구분선이에요.
+ * video_suffix는 업로드 대상 확장자, time_format은 로컬 예약 시각 형식이에요.
+ * retry_delay_seconds는 업로드 실패 반환 후 재시도까지 기다리는 시간(단위: 초, 기본 20초)이에요.
+ * completion_wait_seconds는 브라우저 처리 완료 모달을 닫은 뒤 기다리는 시간(단위: 초, 기본 10초)이에요.
+ * 두 일괄 실행 파일에서 파일 크기별 세션 유지 대기를 대체하며, 늘리면 다음 영상 시작이 늦어져요.
+ * max_retries는 영상당 추가 시도 횟수(단위: 회, 기본 1회)이며, 늘리면 실패 시 시도 횟수가 늘어나요.
+ * 대기 시간을 늘리면 재시도가 늦어지고, 횟수를 늘리면 중복 게시 가능성도 커질 수 있어요.
+ * second_account는 두 번째 실행 파일의 세션·캡처 경로(단위: macro 기준 경로)와
+ * 브라우저 업로드·자동 로그인 차단 플래그(문자열 "1": 활성화)예요.
+ * auto_upload2.py와 같은 값이며, 경로를 바꾸면 사용하는 로그인 계정도 바뀔 수 있어요.
+ * Python에서도 읽으므로 객체 내부는 주석과 후행 쉼표 없이 JSON 문법을 유지해요.
+ */
+export const YOUTUBE_BATCH_CONFIG = {
+  "input_file": "youtube_input.txt",
+  "upload_directory": "youtube_upload",
+  "video_suffix": ".mp4",
+  "sections": ["[TITLE]", "[CONTENT]", "[TIME]"],
+  "separator": "---",
+  "time_format": "%Y-%m-%d %H:%M",
+  "retry_delay_seconds": 20,
+  "completion_wait_seconds": 10,
+  "max_retries": 1,
+  "second_account": {
+    "session_directory": "sessions2",
+    "screenshot_directory": "screenshot2",
+    "force_browser_upload": "1",
+    "disable_auto_login": "1"
+  }
+} as const;
+
+
+/**
+ * SNS 일괄 업로드 설정이에요. 경로는 macro 폴더 기준이며 바꾸면 입력·계정이 바뀌어요.
+ * accounts의 키는 실행 계정 이름이고 값은 환경 변수별 경로·플래그(문자열)예요.
+ * skip_hotkey.id는 프로세스 내 단축키 등록 ID, modifiers는 Ctrl+반복 방지 Win32 비트 플래그,
+ * virtual_key는 D의 Win32 키 코드예요. 바꾸면 건너뛰기 단축키가 바뀌어요.
+ * poll_seconds는 종료 요청 검사 간격(단위: 초)이며 줄이면 반응 속도와 검사 빈도가 늘어요.
+ * minimum_media_count는 실행에 필요한 최소 미디어 수(단위: 개)이며 줄이면 단일 파일도 실행해요.
+ * separator는 한 줄 전체가 일치할 때 게시물을 나누는 구분 문자열이에요.
+ * sections는 허용하는 입력 태그와 메타데이터 필드 이름이며 바꾸면 입력 해석이 바뀌어요.
+ * platforms는 기본 업로드 순서예요. disabled_platforms는 선택해도 건너뛰는 플랫폼이에요.
+ * video_only_platforms는 사진을 건너뛰는 플랫폼이에요. 바꾸면 미디어 전송 대상이 바뀌어요.
+ * youtube_interval_seconds는 완료 후 다음 유튜브 영상까지 대기 시간(단위: 초)이에요.
+ * 늘리면 다음 영상 업로드가 늦어져요. youtube_completion_wait_seconds는 업로더 내부의
+ * 완료 대기(단위: 초)이며 0으로 두어 외부의 10초 대기와 중복되지 않게 해요.
+ * Python에서도 읽으므로 객체 내부는 주석과 후행 쉼표 없이 JSON 문법을 유지해요.
+ */
+export const AUTO_BULK_UPLOAD_CONFIG = {
+  "minimum_media_count": 2,
+  "skip_hotkey": {"id": 2, "modifiers": 16386, "virtual_key": 68, "poll_seconds": 0.1},
+  "separator": "---",
+  "sections": {"[TITLE]": "title", "[CONTENT]": "content", "[TAGS]": "tags", "[RATIO]": "ratio", "[TIME]": "time"},
+  "platforms": ["naver", "instagram", "threads", "tiktok", "youtube"],
+  "disabled_platforms": ["facebook"],
+  "video_only_platforms": ["youtube", "naver"],
+  "youtube_interval_seconds": 10,
+  "youtube_completion_wait_seconds": 0,
+  "accounts": {
+    "first": {"MACRO_INPUT_FILE": "input_bulk1.txt", "MACRO_UPLOAD_DIR": "upload"},
+    "second": {
+      "MACRO_INPUT_FILE": "input_bulk2.txt",
+      "MACRO_UPLOAD_DIR": "upload2",
+      "MACRO_SESSION_DIR": "sessions2",
+      "MACRO_SCREENSHOT_DIR": "screenshot2",
+      "MACRO_FORCE_BROWSER_UPLOAD": "1",
+      "MACRO_DISABLE_AUTO_LOGIN": "1"
+    }
+  }
+} as const;
