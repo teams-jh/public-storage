@@ -118,6 +118,7 @@ def upload_plan(plan: list, uploader, settings=None) -> bool:
     """실패한 영상은 대기 후 재시도하고, 재시도까지 실패하면 멈춰요."""
     settings = settings if settings is not None else load_settings()
     completed = 0
+    unconfirmed = []
     for index, (video, metadata) in enumerate(plan, start=1):
         for attempt in range(settings["max_retries"] + 1):
             scheduled_at = metadata["scheduled_at"]
@@ -130,12 +131,16 @@ def upload_plan(plan: list, uploader, settings=None) -> bool:
             except Exception as error:
                 print(f"업로드 중 문제가 생겼어요: {error}")
                 success = False
-            if success:
+            if success or getattr(uploader, "submission_unconfirmed", False) is True:
                 break
             if attempt < settings["max_retries"]:
                 delay = settings["retry_delay_seconds"]
                 print(f"{video.name} 업로드에 실패했어요. {delay}초 뒤 같은 영상을 다시 시도해요.")
                 time.sleep(delay)
+        if not success and getattr(uploader, "submission_unconfirmed", False) is True:
+            unconfirmed.append((video, metadata["title"]))
+            print(f"{video.name}은 {settings['post_submit_wait_seconds']}초 뒤에도 완료를 확인하지 못했어요. 다음 영상으로 넘어가요.")
+            continue
         if not success:
             print(
                 f"{video.name} 업로드를 확인하지 못해 중단했어요. "
@@ -145,8 +150,12 @@ def upload_plan(plan: list, uploader, settings=None) -> bool:
             return False
         completed += 1
         print(f"{video.name} 업로드를 마쳤어요.")
-    print(f"유튜브 영상 {completed}개를 모두 업로드했어요.")
-    return True
+    print(f"유튜브 업로드 처리를 마쳤어요. 완료 {completed}개 / 완료 미확인 {len(unconfirmed)}개")
+    if unconfirmed:
+        print("완료를 확인하지 못한 영상 목록이에요. YouTube Studio에서 게시 여부를 확인해 주세요.")
+        for video, title in unconfirmed:
+            print(f" - {video.name} | 제목: {title}")
+    return not unconfirmed
 
 
 def main(argv=None) -> int:
@@ -175,7 +184,10 @@ def main(argv=None) -> int:
     from platforms.youtube import YouTubeUploader
     from upload_pause import pause_on_escape
 
-    uploader = YouTubeUploader(completion_wait_seconds=settings["completion_wait_seconds"])
+    uploader = YouTubeUploader(
+        completion_wait_seconds=settings["completion_wait_seconds"],
+        post_submit_wait_seconds=settings["post_submit_wait_seconds"],
+    )
     return 0 if pause_on_escape(upload_plan)(plan, uploader, settings) else 1
 
 

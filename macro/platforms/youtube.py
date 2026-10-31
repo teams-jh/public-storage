@@ -17,10 +17,12 @@ from config import (
 )
 
 class YouTubeUploader(BaseUploader):
-    def __init__(self, completion_wait_seconds=None):
+    def __init__(self, completion_wait_seconds=None, post_submit_wait_seconds=None):
         super().__init__("YouTube")
         self.client_secrets_file = CONFIG.get("YOUTUBE_CLIENT_SECRETS_FILE")
         self.completion_wait_seconds = completion_wait_seconds
+        self.post_submit_wait_seconds = post_submit_wait_seconds
+        self.submission_unconfirmed = False
 
     @contextmanager
     def _browser_upload_session(self, user_data_dir):
@@ -41,7 +43,7 @@ class YouTubeUploader(BaseUploader):
             try:
                 yield browser, state
             finally:
-                if not state["succeeded"] and not browser.is_closed():
+                if not state["succeeded"] and not state.get("skip_failure_hold") and not browser.is_closed():
                     self.logger.warning(
                         f"YouTube 업로드가 실패했어요. 브라우저를 {UPLOAD_FAILURE_BROWSER_HOLD_SECONDS}초 동안 유지해요."
                     )
@@ -326,6 +328,28 @@ class YouTubeUploader(BaseUploader):
         self.logger.info("YouTube 처리 완료 모달 [닫기] 버튼 클릭 완료")
         return True
 
+    def _finish_after_submission(self, page, browser_state) -> bool:
+        """일괄 업로드는 게시 버튼 클릭 후 지정 시간만 기다리고 브라우저를 닫아요."""
+        browser_state["skip_failure_hold"] = True
+        self.wait_with_countdown(page, self.post_submit_wait_seconds, "YouTube 서버 처리 완료 확인")
+        # 완료 모달의 닫기 버튼을 기다리거나 후속 대기를 추가하지 않아요.
+        try:
+            links = page.locator("a[href*='youtu.be'], a.ytcp-video-info")
+            buttons = page.locator("#close-button, button:has-text('닫기'), button:has-text('Close')")
+            confirmed = any(links.nth(i).is_visible() for i in range(links.count())) or any(
+                buttons.nth(i).is_visible() for i in range(buttons.count())
+            )
+        except Exception as error:
+            self.logger.warning(f"YouTube 완료 화면을 확인하지 못했어요: {error}")
+            confirmed = False
+        self.submission_unconfirmed = not confirmed
+        browser_state["succeeded"] = confirmed
+        if confirmed:
+            self.logger.info("YouTube 완료 화면을 확인했어요. 다음 작업으로 넘어가요.")
+        else:
+            self.logger.warning("YouTube 대기 시간이 끝났어요. 완료를 확인하지 못한 항목으로 기록하고 다음 작업으로 넘어가요.")
+        return confirmed
+
     def _finish_browser_upload(self, page, browser_state, video_path, scheduled_at) -> bool:
         """완료 모달을 닫은 뒤 지정된 시간만 기다리고 업로드를 마쳐요."""
         if not self._close_completion_dialog(page):
@@ -349,6 +373,7 @@ class YouTubeUploader(BaseUploader):
         1. Google YouTube Data API v3 (가장 안정적 & OAuth 토큰 저장)
         2. Playwright YouTube Studio 웹 자동화
         """
+        self.submission_unconfirmed = False
         media_type = get_media_type(media_path)
         if media_type != "video":
             self.logger.warning(
@@ -381,7 +406,10 @@ class YouTubeUploader(BaseUploader):
         if secrets_path.exists() and not FORCE_BROWSER_UPLOAD:
             try:
                 self.logger.info("YouTube Data API v3를 통해 업로드를 시작합니다...")
-                return self._upload_via_api(media_path, title, description, tags, scheduled_at)
+                result = self._upload_via_api(media_path, title, description, tags, scheduled_at)
+                if result and self.post_submit_wait_seconds is not None:
+                    time.sleep(self.post_submit_wait_seconds)
+                return result
             except Exception as e:
                 self.logger.error(f"YouTube API 업로드 중 오류: {e}. Playwright 모드로 전환합니다.")
 
@@ -613,6 +641,9 @@ class YouTubeUploader(BaseUploader):
                         if not clicked:
                             self.logger.error(f"YouTube [{action_name}] 버튼 클릭에 실패했어요.")
                             return False
+
+                    if self.post_submit_wait_seconds is not None:
+                        return self._finish_after_submission(page, browser_state)
 
                     self.logger.info(f"{action_name} 버튼 클릭 완료! 서버 처리 및 링크 생성 대기 중 (최대 {upload_timeout}초)...")
 

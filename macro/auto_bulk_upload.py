@@ -86,7 +86,8 @@ def upload_plan(plan: list, selected: list, uploaders: dict, settings: dict, run
                     raise ValueError("예약 시각이 지났어요. [TIME]을 수정해 주세요.")
                 print(f"[{platform} {index}/{len(targets)}] {path.name} 업로드를 시작해요.")
                 if runner is None and uploader is None:
-                    uploader = (uploaders[platform](completion_wait_seconds=settings["youtube_completion_wait_seconds"])
+                    uploader = (uploaders[platform](completion_wait_seconds=settings["youtube_completion_wait_seconds"],
+                                                    post_submit_wait_seconds=settings["youtube_post_submit_wait_seconds"])
                                 if platform == "youtube" else uploaders[platform]())
                 result = (runner(platform, path, metadata.copy()) if runner is not None
                           else uploader.upload(path, metadata.copy()))
@@ -104,7 +105,7 @@ def upload_plan(plan: list, selected: list, uploaders: dict, settings: dict, run
                 continue
             completed += 1
             print(f"[{platform}] {path.name} 업로드를 마쳤어요.")
-            if platform == "youtube" and index < len(targets):
+            if platform == "youtube" and index < len(targets) and settings["youtube_interval_seconds"]:
                 delay = settings["youtube_interval_seconds"]
                 print(f"{delay}초 뒤 다음 유튜브 영상을 업로드해요.")
                 time.sleep(delay)

@@ -175,14 +175,14 @@ class YouTubeBatchTests(unittest.TestCase):
                 batch2.main()
             run.assert_called_once()
 
-    def test_batch_uses_ten_second_completion_wait(self):
+    def test_batch_uses_ten_second_server_wait_without_extra_delay(self):
         with patch.object(batch, "build_upload_plan", return_value=[]):
             with patch("platforms.youtube.YouTubeUploader") as uploader:
                 with patch("upload_pause.pause_on_escape", side_effect=lambda function: function):
                     with patch.object(batch, "upload_plan", return_value=True):
                         with redirect_stdout(io.StringIO()):
                             self.assertEqual(batch.main([]), 0)
-        uploader.assert_called_once_with(completion_wait_seconds=10)
+        uploader.assert_called_once_with(completion_wait_seconds=0, post_submit_wait_seconds=10)
 
     def test_completion_close_wait_and_finish_order(self):
         from platforms.youtube import YouTubeUploader
@@ -199,8 +199,51 @@ class YouTubeBatchTests(unittest.TestCase):
             self.assertTrue(uploader._finish_browser_upload(page, state, Path("video.mp4"), None))
         dynamic_wait.assert_not_called()
         self.assertEqual([call[0] for call in events.mock_calls], ["close", "wait", "screenshot"])
-        events.wait.assert_called_once_with(page, 10, "YouTube 업로드 완료 후 대기")
+        events.wait.assert_called_once_with(page, 0, "YouTube 업로드 완료 후 대기")
         self.assertTrue(state["succeeded"])
+
+    def test_unconfirmed_submission_moves_on_without_retry(self):
+        self.prepare("\n---\n".join(self.entry(title) for title in ("one", "two")), ("1.mp4", "2.mp4"))
+        uploader = Mock()
+        def upload(video, metadata):
+            uploader.submission_unconfirmed = video.name == "1.mp4"
+            return not uploader.submission_unconfirmed
+        uploader.upload.side_effect = upload
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertFalse(batch.upload_plan(self.plan(), uploader, self.settings))
+        self.assertEqual(uploader.upload.call_count, 2)
+        self.sleep.assert_not_called()
+        self.assertIn("1.mp4 | 제목: one", output.getvalue())
+        self.assertIn("완료 1개 / 완료 미확인 1개", output.getvalue())
+
+    def test_bulk_server_wait_is_ten_seconds_without_extra_wait_or_close(self):
+        from platforms.youtube import YouTubeUploader
+
+        uploader = YouTubeUploader(completion_wait_seconds=0, post_submit_wait_seconds=10)
+        page = Mock()
+        page.locator.return_value.count.return_value = 1
+        page.locator.return_value.nth.return_value.is_visible.return_value = True
+        state = {"succeeded": False}
+        with patch.object(uploader, "wait_with_countdown") as wait, patch.object(uploader, "_close_completion_dialog") as close:
+            self.assertTrue(uploader._finish_after_submission(page, state))
+        wait.assert_called_once_with(page, 10, "YouTube 서버 처리 완료 확인")
+        close.assert_not_called()
+        self.assertTrue(state["succeeded"])
+        self.assertTrue(state["skip_failure_hold"])
+
+    def test_bulk_unconfirmed_upload_is_failed_without_failure_hold(self):
+        from platforms.youtube import YouTubeUploader
+
+        uploader = YouTubeUploader(completion_wait_seconds=0, post_submit_wait_seconds=10)
+        page = Mock()
+        page.locator.return_value.count.return_value = 0
+        state = {"succeeded": False}
+        with patch.object(uploader, "wait_with_countdown") as wait:
+            self.assertFalse(uploader._finish_after_submission(page, state))
+        wait.assert_called_once_with(page, 10, "YouTube 서버 처리 완료 확인")
+        self.assertFalse(state["succeeded"])
+        self.assertTrue(state["skip_failure_hold"])
 
     def test_failed_close_does_not_wait_or_mark_success(self):
         from platforms.youtube import YouTubeUploader

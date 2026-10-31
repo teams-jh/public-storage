@@ -67,9 +67,9 @@ class BulkUploadTests(unittest.TestCase):
         uploader.upload.return_value = True
         factory = Mock(return_value=uploader)
         self.assertTrue(bulk.upload_plan(plan, ["youtube"], {"youtube": factory}, self.settings))
-        factory.assert_called_once_with(completion_wait_seconds=0)
+        factory.assert_called_once_with(completion_wait_seconds=0, post_submit_wait_seconds=10)
         self.assertEqual(uploader.upload.call_count, 2)
-        sleep.assert_called_once_with(10)
+        sleep.assert_not_called()
 
     @patch.object(bulk.time, "sleep")
     def test_failure_continues_to_next_file_and_lists_both(self, sleep):
