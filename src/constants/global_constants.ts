@@ -146,10 +146,80 @@ export const MAKE_MP4_DURATION_ROUNDING_SECONDS = 0.005;
 export const MAKE_MP4_VIDEO_FPS = 1;
 
 /**
+ * make_k_pop.py 가사 영상의 프레임 빈도 (단위: 초당 프레임).
+ * 높이면 가사 전환 시점이 정밀해지고 인코딩 시간과 파일 크기가 늘어나요.
+ * 기존 1시간 영상의 MAKE_MP4_VIDEO_FPS와 독립적으로 조절해요.
+ */
+export const MAKE_K_POP_VIDEO_FPS = 30;
+
+/**
  * macro/make_mp4의 AAC 오디오 비트레이트 (단위: kbps).
  * 값을 늘리면 음질과 출력 파일 크기가 함께 늘어나요.
  */
 export const MAKE_MP4_AUDIO_BITRATE_KBPS = 192;
+
+/**
+ * 가사 영상 생성 설정. Python에서 JSON으로 읽으므로 키와 문자열은 큰따옴표를 사용해요.
+ * input_folder/output_folder: make_mp4 폴더 기준 입력/결과 경로. 바꾸면 검색할 음원과 저장할 영상의 위치가 달라져요.
+ * hour_suffix: 반복 영상 파일명에 붙일 문자열. 바꾸면 한 곡 영상과 구분하는 이름이 달라져요.
+ * repeat_duration_seconds: 반복 영상이 반드시 초과해야 하는 기준 길이(초). 곡 전체 단위로 반복하며 마지막 곡을 자르지 않아요. 늘리면 반복 횟수와 파일 크기가 늘어나요.
+ * repeat_gap_seconds: 반복되는 곡 사이의 무음 길이(초). 늘리면 곡 사이의 대기 시간이 길어져요. 첫 곡 앞과 마지막 곡 뒤에는 붙이지 않아요.
+ * rect: 이미지 기준 x/y/너비/높이 비율(0~1). 바꾸면 한영 가사 영역이 이동해요.
+ * font_candidates: 한글 폰트 경로 목록. 상대 경로는 make_mp4 폴더 기준이며 앞에서부터 존재하는 폰트를 사용해요.
+ * font_ratio/min_font_ratio: 이미지 높이 대비 기본/최소 글자 크기 비율. 한글·영어 각각 한 줄에 들어갈 때까지 줄이며 최소값을 낮추면 더 긴 문장이 들어가요.
+ * english_font_scale: 한글 글자 크기 대비 영어 글자 크기 비율(0~1). 줄이면 영어가 더 작게 보여요.
+ * context_radius: 현재 가사 앞뒤에 표시할 가사 개수(각 방향 기준 개). 1이면 이전·현재·다음 최대 3개를 표시해요.
+ * context_opacity: 이전·다음 가사의 불투명도(0~1). 낮추면 흐려지고 현재 가사는 항상 불투명하게 표시해요.
+ * context_slot_gap_ratio: 각 가사 영역 높이 대비 비워 둘 간격 비율(0~1). 늘리면 가사 묶음 사이 간격이 넓어져요.
+ * line_gap_ratio/language_gap_ratio: 글자 크기 대비 줄/언어 사이 간격 비율. 늘리면 더 넓게 배치해요.
+ * ko_color/en_color/stroke_color: RGB 색상 문자열. 가사 및 외곽선 색상을 바꿔요.
+ * stroke_ratio: 글자 크기 대비 외곽선 두께 비율. 늘리면 배경과 더 뚜렷하게 구분돼요.
+ * stroke_multiplier: 픽셀 단위로 계산한 흰색 테두리 두께의 배수(양의 정수). 2이면 기존 두께의 정확히 2배로 표시해요.
+ * bold_ratio: 글자 크기 대비 같은 색으로 확장할 획 두께 비율(0 이상). 늘리면 Regular 폰트도 더 굵어지고 0이면 원래 굵기로 표시해요.
+ * model/device/compute_type: 로컬 음성 인식 모델·장치·연산 형식. 큰 모델은 메모리와 시간이 더 필요해요.
+ * beam_size: 음성 인식 탐색 후보 수(개). 늘리면 탐색 시간이 늘어나요.
+ * max_chars/max_cue_seconds: 자동 가사 한 구간의 글자 수/길이(초) 상한. 줄이면 더 자주 바뀌어요.
+ * translation_timeout_seconds: 번역 요청 제한 시간(초). 늘리면 응답을 더 오래 기다려요.
+ * translation_backend: 기본 번역 방식(local/google). local은 내려받은 모델로 PC에서 번역해요.
+ * translation_model: 로컬 한국어→영어 모델 ID 또는 폴더 경로. 변경하면 번역 품질과 다운로드 용량이 달라져요.
+ * translation_max_new_tokens: 한 문장에서 생성할 최대 토큰 수(개). 늘리면 긴 번역을 생성할 수 있어요.
+ * encoder_preset/crf: H.264 속도 설정/품질 지수(0~51). 느린 preset과 낮은 crf는 변환 비용이 늘어요.
+ */
+export const MAKE_K_POP_LYRICS_CONFIG = {
+  "input_folder": "k_pop",
+  "output_folder": "result/k_pop",
+  "hour_suffix": "_1hour",
+  "repeat_duration_seconds": 3600,
+  "repeat_gap_seconds": 3,
+  "rect": [0.54, 0.16, 0.42, 0.68],
+  "font_candidates": ["Cafe24DongdongRegular.ttf", "C:/Windows/Fonts/malgun.ttf", "/usr/share/fonts/truetype/nanum/NanumGothic.ttf", "/System/Library/Fonts/AppleSDGothicNeo.ttc"],
+  "font_ratio": 0.047,
+  "min_font_ratio": 0.002,
+  "english_font_scale": 0.85,
+  "context_radius": 1,
+  "context_opacity": 0.25,
+  "context_slot_gap_ratio": 0.1,
+  "line_gap_ratio": 0.3,
+  "language_gap_ratio": 0.8,
+  "ko_color": "#000000",
+  "en_color": "#000000",
+  "stroke_color": "#ffffff",
+  "stroke_ratio": 0.02,
+  "stroke_multiplier": 2,
+  "bold_ratio": 0.04,
+  "model": "large-v3",
+  "device": "cpu",
+  "compute_type": "int8",
+  "beam_size": 5,
+  "max_chars": 28,
+  "max_cue_seconds": 7,
+  "translation_timeout_seconds": 30,
+  "translation_backend": "local",
+  "translation_model": "Helsinki-NLP/opus-mt-ko-en",
+  "translation_max_new_tokens": 128,
+  "encoder_preset": "veryfast",
+  "crf": 20
+};
 
 /**
  * 유튜브 일괄 업로드의 파일 경로·입력 형식 설정 (단위: 경로/문자열).

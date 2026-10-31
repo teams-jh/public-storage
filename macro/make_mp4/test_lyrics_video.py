@@ -17,6 +17,98 @@ import lyrics_video as video
 
 
 class LyricsTests(unittest.TestCase):
+    def test_long_korean_and_english_shrink_without_wrapping(self):
+        from PIL import ImageDraw
+
+        config = video.settings()
+        font = video.find_font(config, None)
+        background = Image.new("RGB", (1200, 600), "#facddd")
+        cue = dict(ko="가나다라마바사아자차카타파하" * 5,
+                   en="A very long English lyric with a line break\n" * 4)
+        calls = []
+        original = ImageDraw.ImageDraw.text
+
+        def track(drawer, position, text, **kwargs):
+            calls.append((text, kwargs))
+            return original(drawer, position, text, **kwargs)
+
+        with patch.object(ImageDraw.ImageDraw, "text", new=track):
+            video.lyric_frame(background, [cue] * 3, 1, config, font, config["rect"])
+        expected = {" ".join(cue[key].split()) for key in ("ko", "en")}
+        self.assertEqual(len(calls), 12)  # 3묶음 × 2언어 × 테두리/본문
+        self.assertEqual({text for text, _ in calls}, expected)
+        for text, options in calls:
+            self.assertNotIn("\n", text)
+            self.assertLessEqual(options["font"].getlength(text) + options["stroke_width"] * 2,
+                                 background.width * config["rect"][2])
+            self.assertLess(options["font"].size, round(background.height * config["font_ratio"]))
+
+    def test_lyric_window_first_middle_and_last(self):
+        cues = [dict(ko=str(index), en=str(index)) for index in range(4)]
+        self.assertEqual([cue["ko"] for _, cue in video.lyric_window(cues, 0, 1)], ["0", "1"])
+        self.assertEqual([cue["ko"] for _, cue in video.lyric_window(cues, 1, 1)], ["0", "1", "2"])
+        self.assertEqual([cue["ko"] for _, cue in video.lyric_window(cues, 2, 1)], ["1", "2", "3"])
+        self.assertEqual([cue["ko"] for _, cue in video.lyric_window(cues, 3, 1)], ["2", "3"])
+
+    def test_context_opacity_and_empty_first_slot(self):
+        config = video.settings()
+        font = video.find_font(config, None)
+        background = Image.new("RGB", (1200, 600), "#facddd")
+        cues = [dict(ko="가나다", en="ABC") for _ in range(3)]
+        frame = video.lyric_frame(background, cues, 1, config, font, config["rect"])
+        diff = ImageChops.difference(background, frame)
+        x, y, width, height = [round(value * dimension) for value, dimension in
+                                zip(config["rect"], (1200, 600, 1200, 600))]
+        slot = height // 3
+        strengths = [sum(ImageStat.Stat(diff.crop((x, y + row * slot, x + width, y + (row + 1) * slot))).mean)
+                     for row in range(3)]
+        self.assertGreater(strengths[1], 0)
+        self.assertAlmostEqual(strengths[0] / strengths[1], config["context_opacity"], delta=0.03)
+        self.assertAlmostEqual(strengths[2] / strengths[1], config["context_opacity"], delta=0.03)
+        first = video.lyric_frame(background, cues, 0, config, font, config["rect"])
+        self.assertIsNone(ImageChops.difference(background, first).crop((x, y, x + width, y + slot)).getbbox())
+
+    def test_cached_model_is_loaded_without_network(self):
+        model = object()
+        loader = Mock(return_value=model)
+        self.assertIs(video.load_model_with_cache(loader, "테스트 모델"), model)
+        loader.assert_called_once_with(local_files_only=True)
+
+    def test_model_downloads_only_when_cache_is_missing(self):
+        model = object()
+        loader = Mock(side_effect=[FileNotFoundError("not cached"), model])
+        self.assertIs(video.load_model_with_cache(loader, "테스트 모델"), model)
+        self.assertEqual([call.kwargs for call in loader.call_args_list],
+                         [{"local_files_only": True}, {"local_files_only": False}])
+
+    def test_output_modes_and_existing_single_reuse(self):
+        for mode, existing_single, expected in [(None, False, {"song.mp4", "song_1hour.mp4"}),
+                                                 ("1", False, {"song.mp4"}),
+                                                 ("2", False, {"song_1hour.mp4"}),
+                                                 (None, True, {"song.mp4", "song_1hour.mp4"})]:
+            with self.subTest(mode=mode, existing_single=existing_single), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                result = root / "result"
+                result.mkdir()
+                if existing_single:
+                    (result / "song.mp4").write_bytes(b"existing")
+                args = argparse.Namespace(output_option=mode, force=False, prepare_only=False, dry_run=False, rect=())
+
+                def render(ffmpeg, mp3, image, output, *positional, **kwargs):
+                    output.write_bytes(b"single")
+
+                def repeat(ffmpeg, source, output, duration):
+                    self.assertTrue(source.is_file())
+                    output.write_bytes(b"hour")
+
+                with patch.object(video, "render_video", side_effect=render) as renderer, \
+                        patch.object(video, "repeat_video", side_effect=repeat) as repeater:
+                    video.create_outputs("ffmpeg", root / "song.mp3", root / "song.png", result,
+                                         args, video.settings(), "font")
+                self.assertEqual({p.name for p in result.glob("*.mp4")}, expected)
+                self.assertEqual(renderer.call_count, 0 if existing_single else 1)
+                self.assertEqual(repeater.call_count, 0 if mode == "1" else 1)
+
     def test_google_failure_reports_rate_limit_and_actual_error(self):
         config = dict(video.settings(), translation_backend="google")
         for stderr, expected in [("deep_translator.exceptions.TooManyRequests: blocked", "429"),
@@ -47,10 +139,12 @@ class LyricsTests(unittest.TestCase):
                                     transcribe=Mock(return_value=(iter([segment]), None)))
             whisper = SimpleNamespace(WhisperModel=Mock(return_value=model))
             args = argparse.Namespace(model="test", device="cpu", compute_type="int8")
+            video.speech_model.cache_clear()
             with patch.dict(sys.modules, {"faster_whisper": whisper}), \
                     patch("av.open", side_effect=TypeError("open() got an unexpected keyword argument 'metadata_errors'")) as av_open:
                 cues = video.transcribe(mp3, video.settings(), args)
                 av_open.assert_not_called()
+            video.speech_model.cache_clear()
             audio = model.transcribe.call_args.args[0]
             self.assertIsInstance(audio, np.ndarray)
             self.assertEqual(audio.dtype, np.float32)
@@ -106,6 +200,7 @@ class LyricsTests(unittest.TestCase):
             mp3 = folder / "테스트 곡.mp3"
             image = folder / "테스트 곡.PNG"
             output = folder / "테스트 곡.mp4"
+            single = folder / "한 곡.mp4"
             Image.new("RGB", (640, 360), "#facddd").save(image)
             subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
                             "sine=frequency=440:duration=3", str(mp3)], check=True)
@@ -113,22 +208,20 @@ class LyricsTests(unittest.TestCase):
                     dict(start=1.5, end=2.2, ko="햇살을 따라가요", en="Follow the sunlight")]
             video.save_json(mp3.with_suffix(".lyrics.json"), dict(cues=cues))
             args = argparse.Namespace(offline=True, single_pass=False, prepare_only=False)
-            original_number = video.global_number
-            # 두 번 반복해 실제 인코딩 결과에서 반복 경계까지 검사해요.
-            with patch.object(video, "global_number", side_effect=lambda name:
-                              Decimal(4) if name == "MAKE_MP4_MIN_DURATION_SECONDS" else original_number(name)):
-                video.render_video(ffmpeg, mp3, image, output, args, config, config["rect"], font)
+            video.render_video(ffmpeg, mp3, image, single, args, config, config["rect"], font)
+            # 3초 곡 + 3초 무음 + 3초 곡으로 6초 기준을 초과해요.
+            video.repeat_video(ffmpeg, single, output, 6)
             self.assertTrue(output.exists())
             self.assertFalse(output.with_suffix(".partial.mp4").exists())
-            self.assertTrue(output.with_suffix(".preview.png").exists())
-            self.assertAlmostEqual(float(video.audio_duration_seconds(ffmpeg, output)), 6, delta=0.05)
+            self.assertFalse(list(folder.glob("*.preview.png")))
+            self.assertAlmostEqual(float(video.audio_duration_seconds(ffmpeg, output)), 9, delta=0.15)
             info = subprocess.run([ffmpeg, "-i", str(output)], capture_output=True, text=True, errors="replace")
             self.assertIn("Audio: aac", info.stderr)
             self.assertIn("Video: h264", info.stderr)
             import imageio_ffmpeg
             decoded = imageio_ffmpeg.read_frames(str(output), pix_fmt="rgb24")
             next(decoded)
-            self.assertEqual(sum(1 for _ in decoded), 180)
+            self.assertLessEqual(abs(sum(1 for _ in decoded) - 270), 3)
 
             def frame_at(seconds):
                 raw = subprocess.run([ffmpeg, "-v", "error", "-ss", str(seconds), "-i", str(output),
@@ -137,9 +230,10 @@ class LyricsTests(unittest.TestCase):
                 return Image.frombytes("RGB", (640, 360), raw)
 
             blank = frame_at(0.2)
-            for seconds, visible in [(0.46, False), (0.54, True), (1.04, False),
-                                     (0.7, True), (1.2, False), (1.7, True), (2.5, False),
-                                     (3.2, False), (3.7, True), (4.2, False), (4.7, True), (5.5, False)]:
+            for seconds, visible in [(0.46, False), (0.54, True), (1.04, True),
+                                     (0.7, True), (1.2, True), (1.7, True), (2.5, True),
+                                     (3.2, True), (3.7, True), (4.2, True), (4.7, True), (5.5, True),
+                                     (6.2, False), (6.7, True), (7.2, True), (7.7, True), (8.8, True)]:
                 with self.subTest(seconds=seconds):
                     frame = frame_at(seconds)
                     difference = ImageChops.difference(blank, frame)
@@ -150,6 +244,23 @@ class LyricsTests(unittest.TestCase):
                         self.assertGreater(right, 1)
                     else:
                         self.assertLess(right, 1)
+
+            def text_difference(first, second):
+                difference = ImageChops.difference(frame_at(first), frame_at(second)).crop((340, 0, 640, 360))
+                return sum(ImageStat.Stat(difference).mean)
+
+            # 첫 가사는 1초에 끝나지만 다음 발화가 시작되는 1.5초까지 유지돼요.
+            self.assertLess(text_difference(0.7, 1.2), 1)
+            self.assertLess(text_difference(0.7, 1.46), 1)
+            self.assertGreater(text_difference(0.7, 1.54), 1)
+            self.assertLess(text_difference(1.7, 2.8), 1)
+
+            import numpy as np
+            audio = video.decode_for_whisper(output, 16000)
+            # 무음 양끝의 AAC 경계 오차를 피해서 무음 내부와 양쪽 곡의 소리를 확인해요.
+            self.assertLess(float(np.max(np.abs(audio[int(3.15 * 16000):int(5.85 * 16000)]))), 0.001)
+            for start, end in [(0.2, 2.8), (6.2, 8.8)]:
+                self.assertGreater(float(np.max(np.abs(audio[int(start * 16000):int(end * 16000)]))), 0.01)
 
     def test_translation_failure_saves_progress_and_resumes(self):
         config = video.settings()

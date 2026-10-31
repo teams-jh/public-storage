@@ -1,0 +1,175 @@
+{
+  "source_sha256": "7a67bdd94a1db219477fb5bb454381ac0a238a942caadaaec42e352a49445da1",
+  "recognition_model": "large-v3",
+  "review_required": true,
+  "cues": [
+    {
+      "start": 0,
+      "end": 5.8,
+      "ko": "참 좋았지 우리 그 따뜻한 말들에 나",
+      "en": "That was nice. That's sweet of us."
+    },
+    {
+      "start": 5.8,
+      "end": 11.84,
+      "ko": "사랑을 줬고 받았어 그때를 말하자면",
+      "en": "I've been loved. I'll tell you when."
+    },
+    {
+      "start": 11.84,
+      "end": 17.98,
+      "ko": "나는 조그맣게 말할게 우리 사랑을 말해볼게",
+      "en": "I'll say it in small terms. I'll tell you about our love."
+    },
+    {
+      "start": 23.800000000000004,
+      "end": 29.68,
+      "ko": "네가 좋아하던 날에 난 추억을 심어다",
+      "en": "The day you liked it, I planted memories."
+    },
+    {
+      "start": 30.26,
+      "end": 35.62,
+      "ko": "놓았을 때 그래 마치 이게 사랑이지",
+      "en": "It's like it's love."
+    },
+    {
+      "start": 35.62,
+      "end": 42.0,
+      "ko": "나 또 조그맣게 말할게 너를 내가 다 말해볼게",
+      "en": "I'll say it again. I'll tell you everything."
+    },
+    {
+      "start": 48.800000000000004,
+      "end": 52.76,
+      "ko": "조심스레 다 나눠볼게",
+      "en": "I'll be careful to split it all up."
+    },
+    {
+      "start": 53.519999999999996,
+      "end": 58.7,
+      "ko": "우리 더는 다치지 않게",
+      "en": "We're not gonna get hurt anymore."
+    },
+    {
+      "start": 59.46,
+      "end": 66.36,
+      "ko": "늘 둥그런 너와 내가 닿아있을",
+      "en": "You and I will always be close to each other."
+    },
+    {
+      "start": 66.36,
+      "end": 71.66,
+      "ko": "이 술을 사랑해 너도 그렇지",
+      "en": "I love this drink, and so do you."
+    },
+    {
+      "start": 71.66,
+      "end": 73.4,
+      "ko": "않니",
+      "en": "Don't."
+    },
+    {
+      "start": 84.82,
+      "end": 91.74,
+      "ko": "참 좋아지 우리 항상 웃으며 지낸다",
+      "en": "It's great. We're always laughing."
+    },
+    {
+      "start": 91.74,
+      "end": 97.32,
+      "ko": "네가 좋아하는 것을 다 말해주겠다며",
+      "en": "You said you'd tell me everything you like."
+    },
+    {
+      "start": 97.32,
+      "end": 100.3,
+      "ko": "너는 조그맣게 말했어",
+      "en": "You said it in small terms."
+    },
+    {
+      "start": 100.3,
+      "end": 103.32,
+      "ko": "영원하자 우릴 말했어",
+      "en": "I told you we'd be here forever."
+    },
+    {
+      "start": 110.25999999999999,
+      "end": 114.2,
+      "ko": "조심스레 다 나눠볼게",
+      "en": "I'll be careful to split it all up."
+    },
+    {
+      "start": 114.94,
+      "end": 120.14,
+      "ko": "우리 더는 다치지 않게",
+      "en": "We're not gonna get hurt anymore."
+    },
+    {
+      "start": 120.14,
+      "end": 125.66,
+      "ko": "늘 둥그런 너와 내가",
+      "en": "You and me."
+    },
+    {
+      "start": 125.66,
+      "end": 132.18,
+      "ko": "닿아있을 이 수를 사랑해 너도",
+      "en": "I love this number that I'm gonna reach, and I love you, too."
+    },
+    {
+      "start": 132.18,
+      "end": 134.32,
+      "ko": "그럴 테지만",
+      "en": "I'm sure it is."
+    },
+    {
+      "start": 134.32,
+      "end": 139.52,
+      "ko": "너는 어쩌면 이렇게도",
+      "en": "You could have done it this way."
+    },
+    {
+      "start": 139.52,
+      "end": 145.74,
+      "ko": "내게 빠져있던 얼굴로",
+      "en": "The face I've been hiding from."
+    },
+    {
+      "start": 147.14,
+      "end": 150.42,
+      "ko": "내고 사랑을 말해",
+      "en": "Give it to me. Tell it to me. Tell it to me."
+    },
+    {
+      "start": 150.42,
+      "end": 152.88,
+      "ko": "너는 어쩜 그래",
+      "en": "I don't care about you."
+    },
+    {
+      "start": 153.34,
+      "end": 155.82,
+      "ko": "너의 사랑을 다",
+      "en": "All your love."
+    },
+    {
+      "start": 155.82,
+      "end": 160.04,
+      "ko": "나의 원에 닫아낼게",
+      "en": "I'll close it to my circle."
+    },
+    {
+      "start": 163.35999999999999,
+      "end": 164.76,
+      "ko": "우아",
+      "en": "U-A-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-hmm."
+    },
+    {
+      "start": 168.01999999999998,
+      "end": 169.42,
+      "ko": "우아",
+      "en": "U-A-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-H-hmm."
+    }
+  ]
+}

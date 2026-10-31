@@ -9,6 +9,7 @@ import json
 import math
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -69,13 +70,32 @@ def decode_for_whisper(audio_path, sampling_rate):
     return audio
 
 
-def transcribe(mp3, config, args):
+def load_model_with_cache(loader, label):
+    """디스크 캐시를 먼저 사용하고 필요한 파일이 없을 때만 내려받아요."""
+    try:
+        model = loader(local_files_only=True)
+    except OSError:
+        print(f"저장된 {label}이 없어 내려받아요. 내려받은 파일은 다음 실행에도 사용해요.", flush=True)
+        return loader(local_files_only=False)
+    print(f"저장된 {label}을 사용해요.", flush=True)
+    return model
+
+
+@lru_cache(maxsize=None)
+def speech_model(model_name, device, compute_type):
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
         raise RuntimeError("음성 인식 패키지가 없어요. requirements.txt를 설치해 주세요.") from exc
-    print(f"한글 가사를 인식해요: {args.model} ({args.device}). 첫 실행에는 모델을 내려받아요.", flush=True)
-    model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type)
+    return load_model_with_cache(
+        lambda **options: WhisperModel(model_name, device=device, compute_type=compute_type, **options),
+        "음성 인식 모델",
+    )
+
+
+def transcribe(mp3, config, args):
+    print(f"한글 가사를 인식해요: {args.model} ({args.device})", flush=True)
+    model = speech_model(args.model, args.device, args.compute_type)
     audio = decode_for_whisper(mp3, model.feature_extractor.sampling_rate)
     segments, _ = model.transcribe(audio, language="ko", word_timestamps=True,
                                    beam_size=config["beam_size"], vad_filter=False,
@@ -137,7 +157,7 @@ def load_lyrics(path, mp3, duration, args, config):
             raise RuntimeError("번역 패키지가 없어요. python -m pip install -r requirements.txt를 실행해 주세요.")
         translated = {cue["ko"]: cue["en"] for cue in cues if cue.get("en")}
         if config["translation_backend"] == "local":
-            print("PC에서 영어로 번역해요. 첫 실행에는 번역 모델을 내려받아요.", flush=True)
+            print("PC에서 영어로 번역해요.", flush=True)
         else:
             print("영어로 번역해요. 가사 문장을 Google 번역으로 보내요.", flush=True)
         for index, cue in enumerate(cues, start=1):
@@ -160,10 +180,13 @@ def local_translator(model_name):
     from transformers import MarianMTModel, MarianTokenizer
 
     print(f"번역 모델을 준비해요: {model_name}", flush=True)
-    tokenizer = MarianTokenizer.from_pretrained(model_name)
-    model = MarianMTModel.from_pretrained(model_name)
-    model.eval()
-    return tokenizer, model
+    def load(**options):
+        tokenizer = MarianTokenizer.from_pretrained(model_name, **options)
+        model = MarianMTModel.from_pretrained(model_name, **options)
+        model.eval()
+        return tokenizer, model
+
+    return load_model_with_cache(load, "번역 모델")
 
 
 def translate_text(text, config):
@@ -204,60 +227,79 @@ def translate_text(text, config):
 
 def find_font(config, supplied):
     for candidate in ([str(supplied)] if supplied else config["font_candidates"]):
-        if Path(candidate).is_file():
-            return candidate
+        path = Path(candidate)
+        if not supplied and not path.is_absolute():
+            path = Path(__file__).resolve().parent / path
+        if path.is_file():
+            return str(path.resolve())
     raise ValueError("한글 폰트가 없어요. --font로 한글 TTF/OTF 파일을 지정해 주세요.")
 
 
-def wrap_text(text, font, max_width):
-    lines = []
-    for paragraph in text.splitlines():
-        line = ""
-        for char in paragraph:
-            if line and font.getlength(line + char) > max_width:
-                split = line.rfind(" ")
-                if char != " " and split > 0:
-                    lines.append(line[:split].strip())
-                    line = line[split + 1:] + char
-                else:
-                    lines.append(line.strip())
-                    line = char.lstrip()
-            else:
-                line += char
-        if line.strip():
-            lines.append(line.strip())
-    return lines
+def lyric_window(cues, current_index, radius):
+    """현재 가사와 실제로 존재하는 이전·다음 가사를 표시 순서대로 골라요."""
+    return [(index - current_index, cues[index])
+            for index in range(max(0, current_index - radius), min(len(cues), current_index + radius + 1))]
 
 
-def lyric_frame(background, cue, config, font_path, rect):
-    from PIL import ImageDraw, ImageFont
-    image = background.copy()
-    draw = ImageDraw.Draw(image)
+def lyric_frame(background, cues, current_index, config, font_path, rect):
+    from PIL import Image, ImageColor, ImageDraw, ImageFont
+
+    image = background.convert("RGBA")
+    overlay = Image.new("RGBA", image.size)
+    draw = ImageDraw.Draw(overlay)
     x, y, width, height = [value * dimension for value, dimension in
                             zip(rect, (image.width, image.height, image.width, image.height))]
+    radius = config["context_radius"]
+    window = lyric_window(cues, current_index, radius)
+    slot_height = height / (radius * 2 + 1)
+    available_height = slot_height * (1 - config["context_slot_gap_ratio"])
     maximum = max(1, round(image.height * config["font_ratio"]))
     minimum = max(1, round(image.height * config["min_font_ratio"]))
     for size in range(maximum, minimum - 1, -1):
-        font = ImageFont.truetype(font_path, size)
-        stroke = max(1, round(size * config["stroke_ratio"]))
-        ko, en = [wrap_text(cue[key], font, width - stroke * 2) for key in ("ko", "en")]
-        ascent, descent = font.getmetrics()
-        line_height = ascent + descent + stroke * 2
-        line_gap = size * config["line_gap_ratio"]
-        language_gap = size * config["language_gap_ratio"]
-        total = (len(ko) + len(en)) * line_height + (len(ko) + len(en) - 2) * line_gap + language_gap
-        if total <= height and all(font.getlength(line) + stroke * 2 <= width for line in ko + en):
+        layouts = []
+        for offset, cue in window:
+            groups = []
+            for language, font_size, color in (
+                ("ko", size, config["ko_color"]),
+                ("en", max(1, min(size - 1, round(size * config["english_font_scale"]))), config["en_color"]),
+            ):
+                font = ImageFont.truetype(font_path, font_size)
+                stroke = max(1, round(font_size * config["stroke_ratio"])) * config["stroke_multiplier"]
+                bold = max(0, round(font_size * config["bold_ratio"]))
+                padding = bold + stroke
+                # 원문에 개행이 있어도 한 줄로 합치고, 너비를 넘으면 글자 크기를 줄여요.
+                lines = [" ".join(cue[language].split())]
+                ascent, descent = font.getmetrics()
+                line_height = ascent + descent + padding * 2
+                line_gap = font_size * config["line_gap_ratio"]
+                group_height = len(lines) * line_height + max(0, len(lines) - 1) * line_gap
+                groups.append((lines, font, color, bold, padding, line_height, line_gap, group_height))
+            language_gap = size * config["language_gap_ratio"]
+            total = sum(group[-1] for group in groups) + language_gap
+            fits_width = all(font.getlength(line) + padding * 2 <= width
+                             for lines, font, _, _, padding, _, _, _ in groups for line in lines)
+            if total > available_height or not fits_width:
+                break
+            layouts.append((offset, groups, total, language_gap))
+        else:
             break
     else:
         raise ValueError("가사가 영역보다 길어요. JSON에서 짧은 구간으로 나누거나 --rect를 넓혀 주세요.")
-    top = y + (height - total) / 2
-    for lines, color in ((ko, config["ko_color"]), (en, config["en_color"])):
-        for line in lines:
-            draw.text((x + width / 2, top + stroke), line, font=font, anchor="mt", fill=color,
-                      stroke_width=stroke, stroke_fill=config["stroke_color"])
-            top += line_height + line_gap
-        top += language_gap - line_gap
-    return image
+    for offset, groups, total, language_gap in layouts:
+        top = y + (offset + radius + 0.5) * slot_height - total / 2
+        alpha = round(255 * (1 if offset == 0 else config["context_opacity"]))
+        outline = (*ImageColor.getrgb(config["stroke_color"]), alpha)
+        for lines, font, color, bold, padding, line_height, line_gap, group_height in groups:
+            fill = (*ImageColor.getrgb(color), alpha)
+            for line in lines:
+                position = (x + width / 2, top + padding)
+                draw.text(position, line, font=font, anchor="mt", fill=fill,
+                          stroke_width=padding, stroke_fill=outline)
+                draw.text(position, line, font=font, anchor="mt", fill=fill,
+                          stroke_width=bold, stroke_fill=fill)
+                top += line_height + line_gap
+            top += language_gap - line_gap
+    return Image.alpha_composite(image, overlay).convert("RGB")
 
 
 def render_video(ffmpeg, mp3, image_path, output, args, config, rect, font_path):
@@ -271,27 +313,23 @@ def render_video(ffmpeg, mp3, image_path, output, args, config, rect, font_path)
             duration_decimal = Decimal(audio.getnframes()) / Decimal(audio.getframerate())
         duration = float(duration_decimal)
         cues = load_lyrics(mp3.with_suffix(".lyrics.json"), mp3, duration, args, config)
+        print(f"가사 {len(cues)}구간을 준비했어요: {mp3.stem}", flush=True)
+        if args.prepare_only:
+            return
         with Image.open(image_path) as opened:
             background = ImageOps.exif_transpose(opened).convert("RGB")
         background.save(work / "blank.png")
         timeline = []
-        cursor = 0
+        if cues[0]["start"] > 0:
+            timeline.append(("blank.png", cues[0]["start"]))
         for index, cue in enumerate(cues):
-            if cue["start"] > cursor:
-                timeline.append(("blank.png", cue["start"] - cursor))
             name = f"cue_{index}.png"
-            frame = lyric_frame(background, cue, config, font_path, rect)
+            frame = lyric_frame(background, cues, index, config, font_path, rect)
             frame.save(work / name)
-            if index == 0:
-                frame.save(output.with_suffix(".preview.png"))
-            timeline.append((name, cue["end"] - cue["start"]))
-            cursor = cue["end"]
-        if cursor < duration:
-            timeline.append(("blank.png", duration - cursor))
-        print(f"가사 {len(cues)}구간을 준비했어요: {mp3.stem}", flush=True)
-        if args.prepare_only:
-            return
-        loops = 1 if args.single_pass else repeat_count(duration_decimal, global_number("MAKE_MP4_MIN_DURATION_SECONDS"), Decimal(0))
+            # 발화가 끝나도 유지하고 다음 가사의 발화 시작 시각에 교체해요.
+            display_end = cues[index + 1]["start"] if index + 1 < len(cues) else duration
+            timeline.append((name, display_end - cue["start"]))
+        loops = 1
         fps = int(global_number("MAKE_K_POP_VIDEO_FPS"))
         entries = []
         for loop in range(loops):
@@ -323,6 +361,80 @@ def render_video(ffmpeg, mp3, image_path, output, args, config, rect, font_path)
             temporary.unlink(missing_ok=True)
 
 
+def repeat_video(ffmpeg, source, output, duration):
+    """곡 사이에 무음을 넣고 마지막 곡까지 재생해 기준 길이를 초과해요."""
+    config = settings()
+    gap = Decimal(str(config["repeat_gap_seconds"]))
+    if gap < 0:
+        raise ValueError("곡 사이 무음 길이는 0초 이상으로 설정해 주세요.")
+    source_duration = audio_duration_seconds(ffmpeg, source)
+    # n곡 + (n-1)개 무음이 기준을 초과해야 해요. 마지막에는 무음을 붙이지 않아요.
+    loops = repeat_count(source_duration + gap, Decimal(str(duration)) + gap,
+                         global_number("MAKE_MP4_DURATION_ROUNDING_SECONDS"))
+    temporary = output.with_suffix(".partial.mp4")
+    total = source_duration * loops + gap * (loops - 1)
+    print(f"반복 영상을 만들어요: {output.name} / 곡 전체 {loops}회 / 곡 사이 {gap}초 무음 / 약 {total / 60:.1f}분", flush=True)
+    try:
+        with tempfile.TemporaryDirectory(prefix="k_pop_repeat_") as directory:
+            work = Path(directory)
+            # 목록에는 ASCII 상대 경로만 넣어 한글·공백·따옴표가 있는 파일명도 처리해요.
+            shutil.copyfile(source, work / "source.mp4")
+            if loops > 1 and gap > 0:
+                # 무음 동안은 곡의 마지막 화면을 유지해요. 한 곡 출력에는 무음을 넣지 않아요.
+                subprocess.run([
+                    ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                    "-i", "source.mp4", "-map", "0:v:0", "-map", "0:a:0",
+                    "-vf", f"tpad=stop_mode=clone:stop_duration={gap}", "-af", f"apad=pad_dur={gap}",
+                    "-r", str(int(global_number("MAKE_K_POP_VIDEO_FPS"))),
+                    "-c:v", "libx264", "-preset", config["encoder_preset"], "-crf", str(config["crf"]),
+                    "-tune", "stillimage", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a",
+                    f"{int(global_number('MAKE_MP4_AUDIO_BITRATE_KBPS'))}k", "padded.mp4",
+                ], cwd=work, check=True)
+                entries = ["file 'padded.mp4'"] * (loops - 1) + ["file 'source.mp4'"]
+            else:
+                entries = ["file 'source.mp4'"] * loops
+            (work / "repeat.txt").write_text("\n".join(entries) + "\n", encoding="utf-8")
+            subprocess.run([
+                ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "concat", "-safe", "0", "-i", "repeat.txt",
+                "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", "-movflags", "+faststart", str(temporary.resolve()),
+            ], cwd=work, check=True)
+        temporary.replace(output)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def create_outputs(ffmpeg, mp3, image, result, args, config, font_path):
+    single = result / f"{mp3.stem}.mp4"
+    hour = result / f"{mp3.stem}{config['hour_suffix']}.mp4"
+    targets = ([single] if args.output_option == "1" else [hour] if args.output_option == "2" else [single, hour])
+    pending = [path for path in targets if args.force or not path.exists()]
+    for path in targets:
+        if path not in pending:
+            print(f"이미 만든 영상은 건너뛰어요: {path.name} (다시 만들려면 --force)")
+    if args.prepare_only:
+        if not args.dry_run:
+            render_video(ffmpeg, mp3, image, single, args, config, args.rect, font_path)
+        return
+    if args.dry_run:
+        for path in pending:
+            kind = "한 곡" if path == single else f"곡 사이 {config['repeat_gap_seconds']}초 무음, 곡 전체를 반복해 {config['repeat_duration_seconds']}초 초과"
+            print(f"{mp3.name} + {image.name} → {path} / {kind}")
+        return
+    if not pending:
+        return
+    with tempfile.TemporaryDirectory(prefix="k_pop_source_") as directory:
+        source = single
+        if single in pending:
+            render_video(ffmpeg, mp3, image, single, args, config, args.rect, font_path)
+        elif hour in pending and (args.force or not single.exists()):
+            # 옵션 2는 원본 가사 영상을 임시 폴더에서 만들고 반복 영상만 남겨요.
+            source = Path(directory) / "source.mp4"
+            render_video(ffmpeg, mp3, image, source, args, config, args.rect, font_path)
+        if hour in pending:
+            repeat_video(ffmpeg, source, hour, config["repeat_duration_seconds"])
+
+
 def parse_rect(text):
     try:
         values = tuple(map(float, text.split(",")))
@@ -338,13 +450,15 @@ def parse_rect(text):
 def main():
     config = settings()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--folder", type=Path, default=Path(__file__).resolve().parent, help="음원과 이미지가 있는 폴더")
+    root = Path(__file__).resolve().parent
+    parser.add_argument("option", nargs="?", choices=("1", "2"), help="1: 한 곡만, 2: 1시간 반복만, 생략: 둘 다 만들어요")
+    parser.add_argument("--folder", type=Path, default=root / config["input_folder"], help="음원과 이미지가 있는 폴더 (기본: k_pop)")
     parser.add_argument("--dry-run", action="store_true", help="파일과 길이만 확인해요. 다운로드·번역·파일 저장은 하지 않아요")
-    parser.add_argument("--prepare-only", action="store_true", help="가사 JSON과 미리보기만 만들어요")
+    parser.add_argument("--prepare-only", action="store_true", help="가사 JSON만 준비해요")
     length = parser.add_mutually_exclusive_group()
-    length.add_argument("--single-pass", action="store_true", dest="single_pass", help="한 곡 길이로 만들어요 (기본)")
-    length.add_argument("--repeat-hour", action="store_false", dest="single_pass", help="가사와 곡을 1시간 넘게 반복해요")
-    parser.set_defaults(single_pass=True)
+    length.add_argument("--option", choices=("1", "2"), dest="named_option", help="1: 한 곡만, 2: 1시간 반복만")
+    length.add_argument("--single-pass", action="store_const", const="1", dest="named_option", help="옵션 1과 같아요")
+    length.add_argument("--repeat-hour", action="store_const", const="2", dest="named_option", help="옵션 2와 같아요")
     parser.add_argument("--force", action="store_true", help="기존 MP4를 새로 만들어요. 가사 JSON은 재사용해요")
     parser.add_argument("--offline", action="store_true", help="기존 한영 가사 JSON만 사용해요")
     parser.add_argument("--font", type=Path, help="한글 TTF/OTF 폰트 경로")
@@ -355,6 +469,9 @@ def main():
     parser.add_argument("--translation-backend", choices=("local", "google"), default=config["translation_backend"],
                         help="영어 번역 방식 (기본: PC에서 번역, google: Google 번역으로 전송)")
     args = parser.parse_args()
+    if args.option and args.named_option:
+        parser.error("숫자 옵션과 --option/--single-pass/--repeat-hour 중 하나만 사용해 주세요.")
+    args.output_option = args.option or args.named_option
     config["translation_backend"] = args.translation_backend
     folder = args.folder.resolve()
     pairs = list(matching_pairs(folder))
@@ -362,23 +479,14 @@ def main():
         print("이름이 같은 MP3와 PNG/JPG 파일이 없어요.")
         return 0
     ffmpeg = find_ffmpeg()
-    result = folder / config["output_folder"]
+    result = root / config["output_folder"]
     font_path = None if args.dry_run else find_font(config, args.font)
     if not args.dry_run:
         result.mkdir(parents=True, exist_ok=True)
     failed = False
     for mp3, image in pairs:
-        output = result / f"{mp3.stem}.mp4"
-        if output.exists() and not args.force and not args.prepare_only:
-            print(f"이미 만든 영상은 건너뛰어요: {output.name} (다시 만들려면 --force)")
-            continue
         try:
-            if args.dry_run:
-                duration = audio_duration_seconds(ffmpeg, mp3)
-                loops = 1 if args.single_pass else repeat_count(duration, global_number("MAKE_MP4_MIN_DURATION_SECONDS"), global_number("MAKE_MP4_DURATION_ROUNDING_SECONDS"))
-                print(f"{mp3.name} + {image.name} → {output.name} / {loops}회 / 가사 JSON: {mp3.with_suffix('.lyrics.json').exists()}")
-            else:
-                render_video(ffmpeg, mp3, image, output, args, config, args.rect, font_path)
+            create_outputs(ffmpeg, mp3, image, result, args, config, font_path)
         except Exception as exc:
             failed = True
             print(f"만들지 못했어요: {mp3.name}\n{exc}", file=sys.stderr)
