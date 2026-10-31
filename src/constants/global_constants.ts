@@ -167,7 +167,8 @@ export const MAKE_MP4_AUDIO_BITRATE_KBPS = 192;
  * rect: 이미지 기준 x/y/너비/높이 비율(0~1). 바꾸면 한영 가사 영역이 이동해요.
  * font_candidates: 한글 폰트 경로 목록. 상대 경로는 make_mp4 폴더 기준이며 앞에서부터 존재하는 폰트를 사용해요.
  * font_ratio/min_font_ratio: 이미지 높이 대비 기본/최소 글자 크기 비율. 한글·영어 각각 한 줄에 들어갈 때까지 줄이며 최소값을 낮추면 더 긴 문장이 들어가요.
- * english_font_scale: 한글 글자 크기 대비 영어 글자 크기 비율(0~1). 줄이면 영어가 더 작게 보여요.
+ * source_language/target_language: 인식할 원문/번역 언어 코드. source_label/target_label은 안내에 표시할 언어 이름이에요. 바꾸면 인식·번역 방향과 화면의 위아래 언어가 달라져요.
+ * translation_font_scale: 원문 글자 크기 대비 번역 글자 크기 비율(0~1). 줄이면 아래쪽 번역이 더 작게 보여요.
  * context_radius: 현재 가사 앞뒤에 표시할 가사 개수(각 방향 기준 개). 1이면 이전·현재·다음 최대 3개를 표시해요.
  * context_opacity: 이전·다음 가사의 불투명도(0~1). 낮추면 흐려지고 현재 가사는 항상 불투명하게 표시해요.
  * context_slot_gap_ratio: 각 가사 영역 높이 대비 비워 둘 간격 비율(0~1). 늘리면 가사 묶음 사이 간격이 넓어져요.
@@ -186,6 +187,10 @@ export const MAKE_MP4_AUDIO_BITRATE_KBPS = 192;
  * encoder_preset/crf: H.264 속도 설정/품질 지수(0~51). 느린 preset과 낮은 crf는 변환 비용이 늘어요.
  */
 export const MAKE_K_POP_LYRICS_CONFIG = {
+  "source_language": "ko",
+  "target_language": "en",
+  "source_label": "한글",
+  "target_label": "영어",
   "input_folder": "k_pop",
   "output_folder": "result/k_pop",
   "hour_suffix": "_1hour",
@@ -195,7 +200,7 @@ export const MAKE_K_POP_LYRICS_CONFIG = {
   "font_candidates": ["Cafe24DongdongRegular.ttf", "C:/Windows/Fonts/malgun.ttf", "/usr/share/fonts/truetype/nanum/NanumGothic.ttf", "/System/Library/Fonts/AppleSDGothicNeo.ttc"],
   "font_ratio": 0.047,
   "min_font_ratio": 0.002,
-  "english_font_scale": 0.85,
+  "translation_font_scale": 0.85,
   "context_radius": 1,
   "context_opacity": 0.25,
   "context_slot_gap_ratio": 0.1,
@@ -219,6 +224,28 @@ export const MAKE_K_POP_LYRICS_CONFIG = {
   "translation_max_new_tokens": 128,
   "encoder_preset": "veryfast",
   "crf": 20
+};
+
+/**
+ * make_eng_pop.py의 전용 설정. MAKE_K_POP_LYRICS_CONFIG를 공유하고 아래 속성만 덮어써요.
+ * input_folder/output_folder는 make_mp4 기준 입력/결과 경로이며 바꾸면 파일 검색·저장 위치가 달라져요.
+ * source_language/target_language는 영어 인식·한글 번역 방향, source_label/target_label은 안내 언어 이름이에요.
+ * translation_model은 로컬 영어→한국어 번역 모델 ID예요. 바꾸면 번역 품질·다운로드 용량이 달라져요.
+ * translation_family는 번역 모델 종류(marian/nllb), translation_source_tag/translation_target_tag는 NLLB 원문/번역 언어 태그예요. 바꾸면 불러올 모델 구조와 번역 언어가 달라져요.
+ * 나머지 글자 크기 비율·색상·투명도·무음 길이·반복 기준은 공통 설정과 같은 단위와 효과를 가져요.
+ * Python에서 JSON으로 읽으므로 큰따옴표와 JSON 문법을 유지해요.
+ */
+export const MAKE_ENG_POP_LYRICS_CONFIG = {
+  "input_folder": "eng_pop",
+  "output_folder": "result/eng_pop",
+  "source_language": "en",
+  "target_language": "ko",
+  "source_label": "영어",
+  "target_label": "한글",
+  "translation_model": "facebook/nllb-200-distilled-600M",
+  "translation_family": "nllb",
+  "translation_source_tag": "eng_Latn",
+  "translation_target_tag": "kor_Hang"
 };
 
 /**

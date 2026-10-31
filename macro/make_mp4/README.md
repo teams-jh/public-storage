@@ -1,9 +1,26 @@
 # MP3와 이미지로 영상 만들기
 
-용도와 입력 폴더가 다른 두 실행 스크립트가 있어요.
+용도와 입력 폴더가 다른 세 실행 스크립트가 있어요.
 
 - `make_mp4.py`: 기존 기능이에요. 가사 없이 곡 전체를 반복해 1시간을 초과하는 `result/이름.mp4`를 만들어요. 기존처럼 FFmpeg만 있으면 실행할 수 있어요.
 - `make_k_pop.py`: `k_pop` 폴더의 MP3·이미지로 한영 가사 영상과 1시간 반복 영상을 만들어요. 결과는 `result/k_pop`에 저장해요.
+- `make_eng_pop.py`: `eng_pop` 폴더의 MP3·이미지로 영어 가사 아래에 더 작은 한글 번역을 넣어요. 결과는 `result/eng_pop`에 저장해요.
+
+## 영어 음악 만들기
+
+`macro/make_mp4/eng_pop`에 이름이 같은 MP3와 PNG/JPG를 넣어요. `make_mp4` 폴더에서 아래처럼 실행해요.
+
+```powershell
+python .\make_eng_pop.py      # 한 곡 + 1시간을 넘기는 반복 영상
+python .\make_eng_pop.py 1    # 한 곡 영상만
+python .\make_eng_pop.py 2    # 반복 영상만
+```
+
+영어 음성을 인식하고 한글로 번역해요. 영어를 위에, 한글을 영어 크기의 85%로 아래에 표시해요. 이전·현재·다음 최대 3개 가사, 주변 가사 불투명도 0.25, 줄바꿈 없이 글자 축소, 다음 발화 시작 시 전환, 곡 사이 3초 무음, 동동체 굵은 글자와 흰 테두리는 한국어 음악과 같아요. 미리보기 PNG는 만들지 않아요.
+
+기본 실행은 `result/eng_pop/곡이름.mp4`와 `result/eng_pop/곡이름_1hour.mp4`를 만들어요. 가사 JSON은 음원 옆의 `eng_pop/곡이름.lyrics.json`에 `en`(원문), `ko`(번역), `start`, `end`로 저장해요. `--offline`, `--force`, `--prepare-only`, `--dry-run`, `--folder`, `--font`, `--rect`, `--translation-backend` 등 나머지 옵션도 같아요.
+
+음성 인식 모델은 기존 캐시를 재사용해요. 영어→한글 번역에는 [facebook/nllb-200-distilled-600M](https://huggingface.co/facebook/nllb-200-distilled-600M)을 사용하며 첫 실행에는 별도로 내려받아 캐시에 보관해요. `MAKE_ENG_POP_LYRICS_CONFIG`에서 입력·출력 폴더와 언어·번역 모델을 관리하고 나머지 모양과 반복 설정은 `MAKE_K_POP_LYRICS_CONFIG`를 공유해요.
 
 기존 1시간 영상은 아래 명령으로 만들어요.
 

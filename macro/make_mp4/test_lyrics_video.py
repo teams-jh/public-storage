@@ -17,6 +17,75 @@ import lyrics_video as video
 
 
 class LyricsTests(unittest.TestCase):
+    def test_translation_model_missing_tokenizer_downloads_before_loading(self):
+        tokenizer = object()
+        model = Mock()
+        transformers = SimpleNamespace(
+            MarianTokenizer=SimpleNamespace(from_pretrained=Mock(return_value=tokenizer)),
+            MarianMTModel=SimpleNamespace(from_pretrained=Mock(return_value=model)))
+        def download(**options):
+            if options["local_files_only"]:
+                raise FileNotFoundError("no tokenizer cache")
+            return "downloaded"
+        video.local_translator.cache_clear()
+        with patch.dict(sys.modules, {"transformers": transformers}), \
+                patch("huggingface_hub.hf_hub_download", side_effect=download) as files:
+            self.assertEqual(video.local_translator("test-en-ko-model"), (tokenizer, model))
+        self.assertTrue(files.call_args_list[0].kwargs["local_files_only"])
+        self.assertTrue(all(not call.kwargs["local_files_only"] for call in files.call_args_list[1:]))
+        transformers.MarianTokenizer.from_pretrained.assert_called_once_with("test-en-ko-model", local_files_only=False)
+        model.eval.assert_called_once()
+        video.local_translator.cache_clear()
+
+    def test_eng_pop_recognizes_english_and_translates_into_korean(self):
+        config = video.settings("eng_pop")
+        word = SimpleNamespace(start=0.1, end=0.8, word="Hello world")
+        model = SimpleNamespace(feature_extractor=SimpleNamespace(sampling_rate=16000),
+                                transcribe=Mock(return_value=(iter([SimpleNamespace(words=[word])]), None)))
+        args = argparse.Namespace(model="test", device="cpu", compute_type="int8", offline=False)
+        with patch.object(video, "speech_model", return_value=model), \
+                patch.object(video, "decode_for_whisper", return_value=object()):
+            cues = video.transcribe(Path("song.mp3"), config, args)
+        self.assertEqual(model.transcribe.call_args.kwargs["language"], "en")
+        self.assertEqual(cues, [dict(start=0.1, end=0.8, ko="", en="Hello world")])
+        with tempfile.TemporaryDirectory() as directory:
+            mp3 = Path(directory) / "song.mp3"
+            mp3.write_bytes(b"audio")
+            path = mp3.with_suffix(".lyrics.json")
+            with patch.object(video, "transcribe", return_value=cues), \
+                    patch.object(video.importlib.util, "find_spec", return_value=True), \
+                    patch.object(video, "translate_text", return_value="안녕하세요") as translation:
+                result = video.load_lyrics(path, mp3, 1, args, config)
+            translation.assert_called_once_with("Hello world", config)
+            self.assertEqual(result[0]["en"], "Hello world")
+            self.assertEqual(result[0]["ko"], "안녕하세요")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["source_language"], "en")
+
+    def test_eng_pop_places_smaller_korean_below_english(self):
+        from PIL import ImageDraw
+
+        config = video.settings("eng_pop")
+        font = video.find_font(config, None)
+        background = Image.new("RGB", (1200, 600), "#facddd")
+        calls = []
+        original = ImageDraw.ImageDraw.text
+        def track(drawer, position, text, **kwargs):
+            calls.append((position, text, kwargs["font"].size))
+            return original(drawer, position, text, **kwargs)
+        with patch.object(ImageDraw.ImageDraw, "text", new=track):
+            video.lyric_frame(background, [dict(en="Hello world", ko="안녕하세요")], 0,
+                              config, font, config["rect"])
+        self.assertEqual([text for _, text, _ in calls], ["Hello world", "Hello world", "안녕하세요", "안녕하세요"])
+        self.assertGreater(calls[0][2], calls[2][2])
+        self.assertLess(calls[0][0][1], calls[2][0][1])
+        self.assertEqual(config["input_folder"], "eng_pop")
+        self.assertEqual(config["output_folder"], "result/eng_pop")
+
+    def test_eng_pop_mp4_sync_and_silent_repeat(self):
+        config = video.settings("eng_pop")
+        with patch.object(video, "settings", return_value=config):
+            self.test_mp4_cue_changes_gaps_repeat_boundary_and_audio()
+
     def test_long_korean_and_english_shrink_without_wrapping(self):
         from PIL import ImageDraw
 
@@ -97,7 +166,7 @@ class LyricsTests(unittest.TestCase):
                 def render(ffmpeg, mp3, image, output, *positional, **kwargs):
                     output.write_bytes(b"single")
 
-                def repeat(ffmpeg, source, output, duration):
+                def repeat(ffmpeg, source, output, duration, config=None):
                     self.assertTrue(source.is_file())
                     output.write_bytes(b"hour")
 

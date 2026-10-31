@@ -1,4 +1,4 @@
-"""로컬 가사 인식, 영어 번역, 이미지 배치와 시간별 영상 렌더링."""
+"""로컬 가사 인식·번역, 이미지 배치와 시간별 영상 렌더링."""
 
 import argparse
 from decimal import Decimal
@@ -18,12 +18,19 @@ import wave
 from make_mp4 import audio_duration_seconds, find_ffmpeg, global_number, matching_pairs, repeat_count
 
 
-def settings():
+def settings(profile="k_pop"):
     source = (Path(__file__).resolve().parents[2] / "src/constants/global_constants.ts").read_text(encoding="utf-8")
-    match = re.search(r"export const MAKE_K_POP_LYRICS_CONFIG\s*=\s*(.*?);", source, re.S)
-    if not match:
-        raise ValueError("MAKE_K_POP_LYRICS_CONFIG 설정을 찾을 수 없어요.")
-    return json.loads(match.group(1))
+    def read(name):
+        match = re.search(rf"export const {re.escape(name)}\s*=\s*(.*?);", source, re.S)
+        if not match:
+            raise ValueError(f"{name} 설정을 찾을 수 없어요.")
+        return json.loads(match.group(1))
+    config = read("MAKE_K_POP_LYRICS_CONFIG")
+    if profile == "eng_pop":
+        config.update(read("MAKE_ENG_POP_LYRICS_CONFIG"))
+    elif profile != "k_pop":
+        raise ValueError(f"지원하지 않는 가사 설정이에요: {profile}")
+    return config
 
 
 def save_json(path, data):
@@ -32,7 +39,7 @@ def save_json(path, data):
     temporary.replace(path)
 
 
-def validate_cues(cues, duration, bilingual=True):
+def validate_cues(cues, duration, bilingual=True, source_language="ko"):
     if not isinstance(cues, list) or not cues:
         raise ValueError("가사가 비어 있어요. lyrics.json에 가사와 시간을 넣어 주세요.")
     previous_end = 0
@@ -45,7 +52,7 @@ def validate_cues(cues, duration, bilingual=True):
                 or not math.isfinite(start) or not math.isfinite(end)
                 or not previous_end <= start < end <= duration):
             raise ValueError(f"{index}번째 시간을 확인해 주세요. 0~{duration:.3f}초 안에서 순서대로 겹치지 않아야 해요.")
-        for language in (("ko", "en") if bilingual else ("ko",)):
+        for language in (("ko", "en") if bilingual else (source_language,)):
             if not isinstance(cue.get(language), str) or not cue[language].strip():
                 raise ValueError(f"{index}번째 가사의 {language} 문장을 채워 주세요.")
         previous_end = end
@@ -94,17 +101,22 @@ def speech_model(model_name, device, compute_type):
 
 
 def transcribe(mp3, config, args):
-    print(f"한글 가사를 인식해요: {args.model} ({args.device})", flush=True)
+    language = config["source_language"]
+    print(f"{config['source_label']} 가사를 인식해요: {args.model} ({args.device})", flush=True)
     model = speech_model(args.model, args.device, args.compute_type)
     audio = decode_for_whisper(mp3, model.feature_extractor.sampling_rate)
-    segments, _ = model.transcribe(audio, language="ko", word_timestamps=True,
+    segments, _ = model.transcribe(audio, language=language, word_timestamps=True,
                                    beam_size=config["beam_size"], vad_filter=False,
                                    condition_on_previous_text=False)
     cues = []
+    def make_cue(start, end, text):
+        cue = dict(start=start, end=end, ko="", en="")
+        cue[language] = text
+        return cue
     for segment in segments:
         if not segment.words:
             if segment.text.strip() and segment.end > segment.start:
-                cues.append(dict(start=segment.start, end=segment.end, ko=segment.text.strip(), en=""))
+                cues.append(make_cue(segment.start, segment.end, segment.text.strip()))
             continue
         group = []
         for word in segment.words:
@@ -112,17 +124,16 @@ def transcribe(mp3, config, args):
                 continue
             if group and (len("".join(w.word for w in group)) + len(word.word) > config["max_chars"]
                           or word.end - group[0].start > config["max_cue_seconds"]):
-                cues.append(dict(start=group[0].start, end=group[-1].end,
-                                 ko="".join(w.word for w in group).strip(), en=""))
+                cues.append(make_cue(group[0].start, group[-1].end, "".join(w.word for w in group).strip()))
                 group = []
             group.append(word)
         if group:
-            cues.append(dict(start=group[0].start, end=group[-1].end,
-                             ko="".join(w.word for w in group).strip(), en=""))
+            cues.append(make_cue(group[0].start, group[-1].end, "".join(w.word for w in group).strip()))
     return cues
 
 
 def load_lyrics(path, mp3, duration, args, config):
+    source_language, target_language = config["source_language"], config["target_language"]
     with mp3.open("rb") as source:
         digest = hashlib.file_digest(source, "sha256").hexdigest()
     if path.exists():
@@ -133,6 +144,8 @@ def load_lyrics(path, mp3, duration, args, config):
             raise ValueError("가사 JSON은 cues 목록이 있는 객체 또는 목록이어야 해요.")
         if data.get("source_sha256", digest) != digest:
             raise ValueError(f"음원이 바뀌었어요. {path.name}을 다른 이름으로 보관하고 다시 실행해 주세요.")
+        if data.get("source_language", source_language) != source_language:
+            raise ValueError(f"가사 원문 언어가 달라요. {path.name}의 source_language를 확인해 주세요.")
     else:
         if args.offline:
             raise ValueError(f"{path.name}이 없어요. --offline을 빼거나 한영 가사 JSON을 만들어 주세요.")
@@ -142,45 +155,59 @@ def load_lyrics(path, mp3, duration, args, config):
             cue["start"] = max(previous_end, cue["start"])
             cue["end"] = min(duration, cue["end"])
             previous_end = cue["end"]
-        cues = [cue for cue in cues if cue["start"] < cue["end"] and cue["ko"]]
+        cues = [cue for cue in cues if cue["start"] < cue["end"] and cue[source_language]]
         data = {"source_sha256": digest, "recognition_model": args.model,
-                "review_required": True, "cues": cues}
-        validate_cues(cues, duration, bilingual=False)
+                "source_language": source_language, "review_required": True, "cues": cues}
+        validate_cues(cues, duration, bilingual=False, source_language=source_language)
         save_json(path, data)
-    cues = validate_cues(data.get("cues"), duration, bilingual=False)
-    missing = [cue for cue in cues if not isinstance(cue.get("en"), str) or not cue["en"].strip()]
+    cues = validate_cues(data.get("cues"), duration, bilingual=False, source_language=source_language)
+    missing = [cue for cue in cues if not isinstance(cue.get(target_language), str) or not cue[target_language].strip()]
     if missing and args.offline:
-        raise ValueError(f"영어 가사가 비어 있어요. {path.name}의 en 문장을 채워 주세요.")
+        raise ValueError(f"{config['target_label']} 가사가 비어 있어요. {path.name}의 {target_language} 문장을 채워 주세요.")
     if missing:
         dependencies = ("torch", "transformers", "sentencepiece") if config["translation_backend"] == "local" else ("deep_translator",)
         if any(importlib.util.find_spec(name) is None for name in dependencies):
             raise RuntimeError("번역 패키지가 없어요. python -m pip install -r requirements.txt를 실행해 주세요.")
-        translated = {cue["ko"]: cue["en"] for cue in cues if cue.get("en")}
+        translated = {cue[source_language]: cue[target_language] for cue in cues if cue.get(target_language)}
         if config["translation_backend"] == "local":
-            print("PC에서 영어로 번역해요.", flush=True)
+            print(f"PC에서 {config['target_label']}로 번역해요.", flush=True)
         else:
-            print("영어로 번역해요. 가사 문장을 Google 번역으로 보내요.", flush=True)
+            print(f"{config['target_label']}로 번역해요. 가사 문장을 Google 번역으로 보내요.", flush=True)
         for index, cue in enumerate(cues, start=1):
             if cue in missing:
                 try:
-                    text = translated.get(cue["ko"]) or translate_text(cue["ko"], config)
+                    text = translated.get(cue[source_language]) or translate_text(cue[source_language], config)
                     if not isinstance(text, str) or not text.strip():
                         raise ValueError("빈 번역 결과예요.")
-                    cue["en"] = text.strip()
-                    translated[cue["ko"]] = cue["en"]
+                    cue[target_language] = text.strip()
+                    translated[cue[source_language]] = cue[target_language]
                     save_json(path, data)
-                    print(f"영어 가사를 저장했어요: {index}/{len(cues)}", flush=True)
+                    print(f"{config['target_label']} 가사를 저장했어요: {index}/{len(cues)}", flush=True)
                 except Exception as exc:
                     raise RuntimeError(f"{index}번째 번역을 받지 못했어요. 다시 실행하면 이어서 번역해요: {exc}") from exc
     return validate_cues(cues, duration)
 
 
 @lru_cache(maxsize=None)
-def local_translator(model_name):
-    from transformers import MarianMTModel, MarianTokenizer
+def local_translator(model_name, family="marian", source_tag=None):
+    from huggingface_hub import hf_hub_download
 
     print(f"번역 모델을 준비해요: {model_name}", flush=True)
     def load(**options):
+        if family == "nllb":
+            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+            if not Path(model_name).is_dir():
+                hf_hub_download(repo_id=model_name, filename="sentencepiece.bpe.model", **options)
+            tokenizer = AutoTokenizer.from_pretrained(model_name, src_lang=source_tag, **options)
+            model = AutoModelForSeq2SeqLM.from_pretrained(model_name, **options)
+            model.eval()
+            return tokenizer, model
+        from transformers import MarianMTModel, MarianTokenizer
+        if not Path(model_name).is_dir():
+            # 캐시가 비었을 때 일부 Transformers 버전은 OSError 대신 TypeError를 내요.
+            # 필수 토크나이저 파일을 먼저 확인해 캐시 누락을 일관되게 처리해요.
+            for filename in ("source.spm", "target.spm", "vocab.json"):
+                hf_hub_download(repo_id=model_name, filename=filename, **options)
         tokenizer = MarianTokenizer.from_pretrained(model_name, **options)
         model = MarianMTModel.from_pretrained(model_name, **options)
         model.eval()
@@ -193,23 +220,28 @@ def translate_text(text, config):
     if config["translation_backend"] == "local":
         import torch
 
-        tokenizer, model = local_translator(config["translation_model"])
+        tokenizer, model = local_translator(config["translation_model"], config.get("translation_family", "marian"),
+                                            config.get("translation_source_tag"))
         inputs = tokenizer(text, return_tensors="pt", truncation=False)
         if inputs["input_ids"].shape[-1] > model.config.max_position_embeddings:
             raise ValueError("번역할 가사가 너무 길어요. JSON에서 짧은 문장으로 나눠 주세요.")
         with torch.inference_mode():
+            language_options = {}
+            if config.get("translation_target_tag"):
+                language_options["forced_bos_token_id"] = tokenizer.convert_tokens_to_ids(config["translation_target_tag"])
             output = model.generate(**inputs, num_beams=config["beam_size"], do_sample=False,
-                                    max_new_tokens=config["translation_max_new_tokens"])
+                                    max_new_tokens=config["translation_max_new_tokens"], **language_options)
         return tokenizer.decode(output[0], skip_special_tokens=True)
 
     # deep-translator는 요청 timeout을 전달하지 않아 별도 프로세스로 실행 시간을 제한해요.
     worker = (
         "import json,sys; from deep_translator import GoogleTranslator; "
-        "text=json.loads(sys.stdin.read()); "
-        "print(json.dumps(GoogleTranslator(source='ko', target='en').translate(text)))"
+        "data=json.loads(sys.stdin.read()); "
+        "print(json.dumps(GoogleTranslator(source=data['source'], target=data['target']).translate(data['text'])))"
     )
     try:
-        result = subprocess.run([sys.executable, "-c", worker], input=json.dumps(text),
+        payload = dict(text=text, source=config["source_language"], target=config["target_language"])
+        result = subprocess.run([sys.executable, "-c", worker], input=json.dumps(payload),
                                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                                 timeout=config["translation_timeout_seconds"])
     except subprocess.TimeoutExpired as exc:
@@ -260,8 +292,9 @@ def lyric_frame(background, cues, current_index, config, font_path, rect):
         for offset, cue in window:
             groups = []
             for language, font_size, color in (
-                ("ko", size, config["ko_color"]),
-                ("en", max(1, min(size - 1, round(size * config["english_font_scale"]))), config["en_color"]),
+                (config["source_language"], size, config[f"{config['source_language']}_color"]),
+                (config["target_language"], max(1, min(size - 1, round(size * config["translation_font_scale"]))),
+                 config[f"{config['target_language']}_color"]),
             ):
                 font = ImageFont.truetype(font_path, font_size)
                 stroke = max(1, round(font_size * config["stroke_ratio"])) * config["stroke_multiplier"]
@@ -361,9 +394,9 @@ def render_video(ffmpeg, mp3, image_path, output, args, config, rect, font_path)
             temporary.unlink(missing_ok=True)
 
 
-def repeat_video(ffmpeg, source, output, duration):
+def repeat_video(ffmpeg, source, output, duration, config=None):
     """곡 사이에 무음을 넣고 마지막 곡까지 재생해 기준 길이를 초과해요."""
-    config = settings()
+    config = settings() if config is None else config
     gap = Decimal(str(config["repeat_gap_seconds"]))
     if gap < 0:
         raise ValueError("곡 사이 무음 길이는 0초 이상으로 설정해 주세요.")
@@ -432,7 +465,7 @@ def create_outputs(ffmpeg, mp3, image, result, args, config, font_path):
             source = Path(directory) / "source.mp4"
             render_video(ffmpeg, mp3, image, source, args, config, args.rect, font_path)
         if hour in pending:
-            repeat_video(ffmpeg, source, hour, config["repeat_duration_seconds"])
+            repeat_video(ffmpeg, source, hour, config["repeat_duration_seconds"], config=config)
 
 
 def parse_rect(text):
@@ -447,12 +480,12 @@ def parse_rect(text):
     return values
 
 
-def main():
-    config = settings()
+def main(profile="k_pop"):
+    config = settings(profile)
     parser = argparse.ArgumentParser(description=__doc__)
     root = Path(__file__).resolve().parent
     parser.add_argument("option", nargs="?", choices=("1", "2"), help="1: 한 곡만, 2: 1시간 반복만, 생략: 둘 다 만들어요")
-    parser.add_argument("--folder", type=Path, default=root / config["input_folder"], help="음원과 이미지가 있는 폴더 (기본: k_pop)")
+    parser.add_argument("--folder", type=Path, default=root / config["input_folder"], help=f"음원과 이미지가 있는 폴더 (기본: {config['input_folder']})")
     parser.add_argument("--dry-run", action="store_true", help="파일과 길이만 확인해요. 다운로드·번역·파일 저장은 하지 않아요")
     parser.add_argument("--prepare-only", action="store_true", help="가사 JSON만 준비해요")
     length = parser.add_mutually_exclusive_group()
@@ -467,7 +500,7 @@ def main():
     parser.add_argument("--device", default=config["device"], choices=("cpu", "cuda", "auto"))
     parser.add_argument("--compute-type", default=config["compute_type"])
     parser.add_argument("--translation-backend", choices=("local", "google"), default=config["translation_backend"],
-                        help="영어 번역 방식 (기본: PC에서 번역, google: Google 번역으로 전송)")
+                        help="가사 번역 방식 (기본: PC에서 번역, google: Google 번역으로 전송)")
     args = parser.parse_args()
     if args.option and args.named_option:
         parser.error("숫자 옵션과 --option/--single-pass/--repeat-hour 중 하나만 사용해 주세요.")
