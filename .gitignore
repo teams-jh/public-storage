@@ -167,3 +167,6 @@ macro/attendance-check/sessions/
 macro/upload/*
 !macro/upload/.gitkeep
 
+# Generated music videos and intermediate results
+/macro/make_mp4/result/
+
