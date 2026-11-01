@@ -292,11 +292,12 @@ def lyric_frame(background, cues, current_index, config, font_path, rect):
         stroke = max(1, round(font_size * config["stroke_ratio"])) * config["stroke_multiplier"]
         bold = max(0, round(font_size * config["bold_ratio"]))
         padding = bold + stroke
-        lines = [" ".join(text.split())]
+        lines = [" ".join(line.split()) for line in text.splitlines() if line.strip()] or [""]
         ascent, descent = font.getmetrics()
         line_height = ascent + descent + padding * 2
         line_gap = font_size * config["line_gap_ratio"]
-        return (lines, font, color, bold, padding, line_height, line_gap, line_height)
+        group_height = len(lines) * line_height + (len(lines) - 1) * line_gap
+        return (lines, font, color, bold, padding, line_height, line_gap, group_height)
 
     # 기본 크기는 영역 높이로만 정해요. 어느 문장이 길어도 다른 줄의 기본 크기는 같아요.
     for size in range(maximum, minimum - 1, -1):
@@ -320,15 +321,41 @@ def lyric_frame(background, cues, current_index, config, font_path, rect):
             for font_size in range(normal_size, min(minimum, normal_size) - 1, -1):
                 group = line_layout(cue[language], font_size, color)
                 lines, font, _, _, padding, _, _, _ = group
-                if font.getlength(lines[0]) + padding * 2 <= width:
+                if max(font.getlength(line) for line in lines) + padding * 2 <= width:
                     break
             else:
                 raise ValueError("가사가 영역보다 길어요. JSON에서 짧은 구간으로 나누거나 --rect를 넓혀 주세요.")
             groups.append(group)
         total = sum(group[-1] for group in groups) + language_gap
         layouts.append((offset, groups, total, language_gap))
+
+    # 여러 줄이 있는 구간은 주변 칸의 여유 공간을 먼저 사용해요.
+    # 모두 한 줄이면 기존의 고정된 칸과 글자 크기를 그대로 유지해요.
+    slot_sizes = [slot_height] * (radius * 2 + 1)
+    slot_gap = slot_height - available_height
+    if any(total > available_height for _, _, total, _ in layouts):
+        for offset, _, total, _ in layouts:
+            slot_sizes[offset + radius] = total + slot_gap
+        while sum(slot_sizes) > height:
+            candidates = [(row, language) for row, (_, groups, total, _) in enumerate(layouts)
+                          if total > available_height
+                          for language, group in enumerate(groups)
+                          if group[1].size > min(minimum, styles[language][1])]
+            if not candidates:
+                raise ValueError("가사 영역의 높이가 부족해요. JSON에서 구간을 나누거나 --rect를 넓혀 주세요.")
+            row, language = max(candidates, key=lambda item: layouts[item[0]][1][item[1]][-1])
+            offset, groups, _, gap = layouts[row]
+            group = groups[language]
+            groups[language] = line_layout(window[row][1][styles[language][0]], group[1].size - 1, group[2])
+            total = sum(group[-1] for group in groups) + gap
+            layouts[row] = (offset, groups, total, gap)
+            slot_sizes[offset + radius] = total + slot_gap
+        extra = (height - sum(slot_sizes)) / len(slot_sizes)
+        slot_sizes = [size + extra for size in slot_sizes]
+
     for offset, groups, total, language_gap in layouts:
-        top = y + (offset + radius + 0.5) * slot_height - total / 2
+        slot = offset + radius
+        top = y + sum(slot_sizes[:slot]) + (slot_sizes[slot] - total) / 2
         alpha = round(255 * (1 if offset == 0 else config["context_opacity"]))
         outline = (*ImageColor.getrgb(config["stroke_color"]), alpha)
         for lines, font, color, bold, padding, line_height, line_gap, group_height in groups:

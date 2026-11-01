@@ -173,7 +173,7 @@ export const MAKE_MP4_AUDIO_BITRATE_KBPS = 192;
  * repeat_gap_seconds: 반복되는 곡 사이의 무음 길이(초). 늘리면 곡 사이의 대기 시간이 길어져요. 첫 곡 앞과 마지막 곡 뒤에는 붙이지 않아요.
  * rect: 이미지 기준 x/y/너비/높이 비율(0~1). 바꾸면 한영 가사 영역이 이동해요.
  * font_candidates: 한글 폰트 경로 목록. 상대 경로는 make_mp4 폴더 기준이며 앞에서부터 존재하는 폰트를 사용해요.
- * font_ratio/min_font_ratio: 이미지 높이 대비 기본/최소 글자 크기 비율. 한글·영어 각각 한 줄에 들어갈 때까지 줄이며 최소값을 낮추면 더 긴 문장이 들어가요.
+ * font_ratio/min_font_ratio: 이미지 높이 대비 기본/최소 글자 크기 비율. 한글·영어 각각 명시한 줄바꿈을 유지하며 줄별 너비와 묶음 높이에 맞춰 줄여요. 최소값을 낮추면 더 긴 문장이 들어가요.
  * source_language/target_language: 인식할 원문/번역 언어 코드. source_label/target_label은 안내에 표시할 언어 이름이에요. 바꾸면 인식·번역 방향과 화면의 위아래 언어가 달라져요.
  * translation_font_scale: 원문 글자 크기 대비 번역 글자 크기 비율(0~1). 줄이면 아래쪽 번역이 더 작게 보여요.
  * context_radius: 현재 가사 앞뒤에 표시할 가사 개수(각 방향 기준 개). 1이면 이전·현재·다음 최대 3개를 표시해요.

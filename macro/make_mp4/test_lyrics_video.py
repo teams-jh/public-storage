@@ -164,7 +164,7 @@ class LyricsTests(unittest.TestCase):
         font = video.find_font(config, None)
         background = Image.new("RGB", (1200, 600), "#facddd")
         cue = dict(ko="가나다라마바사아자차카타파하" * 5,
-                   en="A very long English lyric with a line break\n" * 4)
+                   en="A very long English lyric without a line break " * 4)
         calls = []
         original = ImageDraw.ImageDraw.text
 
@@ -182,6 +182,82 @@ class LyricsTests(unittest.TestCase):
             self.assertLessEqual(options["font"].getlength(text) + options["stroke_width"] * 2,
                                  background.width * config["rect"][2])
             self.assertLess(options["font"].size, round(background.height * config["font_ratio"]))
+
+    def test_one_wrapped_language_uses_spare_space_without_shrinking_fonts(self):
+        from PIL import ImageDraw
+
+        for profile in ("k_pop", "eng_pop"):
+            with self.subTest(profile=profile):
+                config = video.settings(profile)
+                font = video.find_font(config, None)
+                background = Image.new("RGB", (1200, 600), "#facddd")
+                cues = [dict(ko=f"가사 {letter}", en=f"Line {letter}") for letter in ("A", "B", "C")]
+                original = ImageDraw.ImageDraw.text
+
+                def inspect(rows):
+                    sizes, boxes = {}, []
+                    def track(drawer, position, text, **options):
+                        sizes[text] = options["font"].size
+                        boxes.append(drawer.textbbox(position, text, font=options["font"],
+                                                     anchor=options["anchor"], stroke_width=options["stroke_width"]))
+                        return original(drawer, position, text, **options)
+                    with patch.object(ImageDraw.ImageDraw, "text", new=track):
+                        video.lyric_frame(background, rows, 1, config, font, config["rect"])
+                    return sizes, boxes
+
+                baseline, _ = inspect(cues)
+                for language, extra in (("ko", "두 번째 줄"), ("en", "Second line")):
+                    changed = [dict(cue) for cue in cues]
+                    changed[1][language] += "\n" + extra
+                    actual, boxes = inspect(changed)
+                    for line, size in baseline.items():
+                        self.assertEqual(actual[line], size)
+                    self.assertEqual(actual[extra], baseline[cues[1][language]])
+                    x, y, width, height = [value * dimension for value, dimension in
+                                          zip(config["rect"], (1200, 600, 1200, 600))]
+                    for left, top, right, bottom in boxes:
+                        self.assertGreaterEqual(left, x)
+                        self.assertLessEqual(right, x + width)
+                        self.assertGreaterEqual(top, y)
+                        self.assertLessEqual(bottom, y + height)
+                    # Four draw calls per one-line cue; the middle cue has six.
+                    self.assertLessEqual(max(box[3] for box in boxes[:4]), min(box[1] for box in boxes[4:10]))
+                    self.assertLessEqual(max(box[3] for box in boxes[4:10]), min(box[1] for box in boxes[10:]))
+
+    def test_explicit_line_breaks_preserve_both_languages_and_fit_each_slot(self):
+        from PIL import ImageDraw
+
+        for profile in ("k_pop", "eng_pop"):
+            with self.subTest(profile=profile):
+                config = video.settings(profile)
+                font = video.find_font(config, None)
+                background = Image.new("RGB", (1200, 600), "#facddd")
+                cue = dict(ko="이 수를 사랑해\n너도 그렇지 않니",
+                           en="I love this number.\nDon't you feel the same?")
+                calls = []
+                original = ImageDraw.ImageDraw.text
+
+                def track(drawer, position, text, **options):
+                    bounds = drawer.textbbox(position, text, font=options["font"],
+                                             anchor=options["anchor"], stroke_width=options["stroke_width"])
+                    calls.append((text, bounds))
+                    return original(drawer, position, text, **options)
+
+                with patch.object(ImageDraw.ImageDraw, "text", new=track):
+                    video.lyric_frame(background, [cue] * 3, 1, config, font, config["rect"])
+                languages = (config["source_language"], config["target_language"])
+                expected = [line for language in languages for line in cue[language].splitlines()
+                            for _ in range(2)]
+                self.assertEqual([text for text, _ in calls], expected * 3)
+                x, y, width, height = [value * dimension for value, dimension in
+                                      zip(config["rect"], (1200, 600, 1200, 600))]
+                slot_height = height / 3
+                for slot in range(3):
+                    for _, (left, top, right, bottom) in calls[slot * len(expected):(slot + 1) * len(expected)]:
+                        self.assertGreaterEqual(left, x)
+                        self.assertLessEqual(right, x + width)
+                        self.assertGreaterEqual(top, y + slot * slot_height)
+                        self.assertLessEqual(bottom, y + (slot + 1) * slot_height)
 
     def test_lyric_window_first_middle_and_last(self):
         cues = [dict(ko=str(index), en=str(index)) for index in range(4)]
