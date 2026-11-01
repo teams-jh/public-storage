@@ -2,7 +2,7 @@
 
 용도와 입력 폴더가 다른 세 실행 스크립트가 있어요.
 
-- `make_mp4.py`: 기존 기능이에요. 가사 없이 곡 전체를 반복해 1시간을 초과하는 `result/이름.mp4`를 만들어요. 기존처럼 FFmpeg만 있으면 실행할 수 있어요.
+- `make_mp4.py`: `merge_1hour` 폴더의 MP3·이미지를 사용해요. 가사 없이 곡 전체를 반복해 1시간을 초과하는 `result/이름.mp4`를 만들어요. 기존처럼 FFmpeg만 있으면 실행할 수 있어요.
 - `make_k_pop.py`: `k_pop` 폴더의 MP3·이미지로 한영 가사 영상과 1시간 반복 영상을 만들어요. 결과는 `result/k_pop`에 저장해요.
 - `make_eng_pop.py`: `eng_pop` 폴더의 MP3·이미지로 영어 가사 아래에 더 작은 한글 번역을 넣어요. 결과는 `result/eng_pop`에 저장해요.
 
@@ -14,6 +14,7 @@
 python .\make_eng_pop.py      # 한 곡 + 1시간을 넘기는 반복 영상
 python .\make_eng_pop.py 1    # 한 곡 영상만
 python .\make_eng_pop.py 2    # 반복 영상만
+python .\make_eng_pop.py 3    # 없는 가사 JSON만
 ```
 
 영어 음성을 인식하고 한글로 번역해요. 영어를 위에, 한글을 영어 크기의 85%로 아래에 표시해요. 이전·현재·다음 최대 3개 가사, 주변 가사 불투명도 0.25, 줄바꿈 없이 글자 축소, 다음 발화 시작 시 전환, 곡 사이 3초 무음, 동동체 굵은 글자와 흰 테두리는 한국어 음악과 같아요. 미리보기 PNG는 만들지 않아요.
@@ -21,6 +22,8 @@ python .\make_eng_pop.py 2    # 반복 영상만
 기본 실행은 `result/eng_pop/곡이름.mp4`와 `result/eng_pop/곡이름_1hour.mp4`를 만들어요. 가사 JSON은 음원 옆의 `eng_pop/곡이름.lyrics.json`에 `en`(원문), `ko`(번역), `start`, `end`로 저장해요. `--offline`, `--force`, `--prepare-only`, `--dry-run`, `--folder`, `--font`, `--rect`, `--translation-backend` 등 나머지 옵션도 같아요.
 
 음성 인식 모델은 기존 캐시를 재사용해요. 영어→한글 번역에는 [facebook/nllb-200-distilled-600M](https://huggingface.co/facebook/nllb-200-distilled-600M)을 사용하며 첫 실행에는 별도로 내려받아 캐시에 보관해요. `MAKE_ENG_POP_LYRICS_CONFIG`에서 입력·출력 폴더와 언어·번역 모델을 관리하고 나머지 모양과 반복 설정은 `MAKE_K_POP_LYRICS_CONFIG`를 공유해요.
+
+`macro/make_mp4/merge_1hour` 폴더를 만들고 이름이 같은 MP3와 PNG/JPG를 넣어요. 폴더 바로 아래 파일만 처리하고, 결과는 `macro/make_mp4/result/이름.mp4`에 저장해요. 입력 폴더는 `src/constants/global_constants.ts`의 `MAKE_MP4_INPUT_FOLDER`에서 조절해요.
 
 기존 1시간 영상은 아래 명령으로 만들어요.
 
@@ -65,9 +68,12 @@ Google 번역을 선택하려면 `--translation-backend google`을 붙여요. �
 python .\make_k_pop.py      # 한 곡 + 1시간 반복 모두 만들어요
 python .\make_k_pop.py 1    # 한 곡 영상만 만들어요
 python .\make_k_pop.py 2    # 1시간 반복 영상만 만들어요
+python .\make_k_pop.py 3    # 없는 가사 JSON만 만들어요
 ```
 
-`--option 1`, `--option 2`도 같은 동작이에요. 기존 `--single-pass`는 옵션 1, `--repeat-hour`는 옵션 2와 같아요. 숫자와 이름 옵션을 함께 넣으면 한 가지만 선택해 달라는 메시지가 나와요.
+`--option 1`, `--option 2`, `--option 3`도 같은 동작이에요. 기존 `--single-pass`는 옵션 1, `--repeat-hour`는 옵션 2와 같아요. 숫자와 이름 옵션을 함께 넣으면 한 가지만 선택해 달라는 메시지가 나와요.
+
+옵션 3은 MP3 옆에 `곡이름.lyrics.json`만 만들어요. 원문·번역·시각을 함께 저장하며 이미지나 폰트는 필요하지 않아요. MP4와 미리보기, 결과 폴더는 만들지 않아요. **이미 JSON이 있으면 내용을 읽거나 수정하지 않고 건너뛰며 `--force`를 붙여도 그대로 둬요.** 미완성 JSON도 건너뛰어요. 기존 JSON의 빈 번역을 이어 채우려면 `--prepare-only`를 사용해 주세요.
 
 한 곡과 반복 영상은 파일별로 존재 여부를 확인해요. 한 곡 영상만 있으면 기본 실행에서 반복 영상만 추가로 만들어요. 옵션 2는 한 곡 영상이 없으면 임시로 생성해 반복 영상만 남겨요. `--force`는 선택한 결과물을 다시 만들어요. 반복 영상은 무음을 붙인 한 곡 구간을 한 번 인코딩한 뒤 이어 붙여요. 가사 인식·번역은 다시 하지 않아요.
 
@@ -105,6 +111,8 @@ python macro/make_mp4/make_k_pop.py --single-pass --offline --force
 ```
 
 ## 가사 위치와 글꼴
+
+긴 문장의 글자 크기는 가사와 언어별로 따로 줄여요. A·B·C 중 B만 길다면 B의 긴 줄만 작아지고 A·C와 B의 다른 언어는 원래 크기를 유지해요. 원문과 번역의 기본 크기 비율은 유지하되, 너비를 넘는 줄에만 축소를 적용해요.
 
 현재 가사는 가운데에 선명하게 표시하고, 위에는 이전 가사, 아래에는 다음 가사를 함께 보여요. 한글·영어 한 쌍을 한 가사로 봤을 때 최대 3개이며 이전·다음 가사의 불투명도는 0.25로 흐리게 표시해요. 첫 가사에서는 현재·다음, 마지막에서는 이전·현재만 보여요. 영어 크기는 한글의 85%로 줄였어요. 긴 문장이 있으면 세 묶음이 영역 안에 들어가도록 글자 크기를 줄여 한글·영어 각각 한 줄로 표시해요. 다음 발화가 시작되면 표시하는 가사 묶음도 한 칸씩 바뀌어요.
 

@@ -17,6 +17,77 @@ import lyrics_video as video
 
 
 class LyricsTests(unittest.TestCase):
+    def test_long_middle_line_does_not_shrink_other_cues_or_languages(self):
+        from PIL import ImageDraw
+
+        background = Image.new("RGB", (1200, 600), "#facddd")
+        original = ImageDraw.ImageDraw.text
+        for profile in ("k_pop", "eng_pop"):
+            config = video.settings(profile)
+            font = video.find_font(config, None)
+            cues = [dict(ko=f"가사 {letter}", en=f"Line {letter}") for letter in ("A", "B", "C")]
+
+            def sizes_for(rows):
+                sizes = {}
+                def track(drawer, position, text, **options):
+                    sizes[text] = options["font"].size
+                    return original(drawer, position, text, **options)
+                with patch.object(ImageDraw.ImageDraw, "text", new=track):
+                    video.lyric_frame(background, rows, 1, config, font, config["rect"])
+                return sizes
+
+            normal = sizes_for(cues)
+            for language in ("ko", "en"):
+                with self.subTest(profile=profile, long_language=language):
+                    changed = [dict(cue) for cue in cues]
+                    changed[1][language] = ("아주 긴 가사 " if language == "ko" else "A very long lyric ") * 20
+                    actual = sizes_for(changed)
+                    long_text = " ".join(changed[1][language].split())
+                    self.assertLess(actual[long_text], normal[cues[1][language]])
+                    for text, size in normal.items():
+                        if text != cues[1][language]:
+                            self.assertEqual(actual[text], size)
+
+    def test_option_three_skips_existing_json_even_with_force(self):
+        with tempfile.TemporaryDirectory() as directory:
+            mp3 = Path(directory) / "song.mp3"
+            path = mp3.with_suffix(".lyrics.json")
+            original = b"user-edited JSON, do not touch"
+            path.write_bytes(original)
+            args = argparse.Namespace(output_option="3", force=True, dry_run=False)
+            with patch.object(video, "find_ffmpeg") as ffmpeg, \
+                    patch.object(video, "load_lyrics") as lyrics, \
+                    patch.object(video, "render_video") as render:
+                video.create_outputs(None, mp3, None, Path(directory) / "result", args, video.settings(), None)
+            ffmpeg.assert_not_called()
+            lyrics.assert_not_called()
+            render.assert_not_called()
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_option_three_builds_json_without_image_font_or_result_folder(self):
+        for profile, option in [("k_pop", ["3"]), ("eng_pop", ["--option", "3"])]:
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as directory:
+                folder = Path(directory)
+                mp3 = folder / "song.MP3"
+                mp3.write_bytes(b"audio")
+                config = dict(video.settings(profile), output_folder=str(folder / "result"))
+                def build(path, source, duration, args, selected_config):
+                    video.save_json(path, dict(cues=[dict(start=0, end=1, ko="가사", en="Lyrics")]))
+                with patch.object(sys, "argv", ["script", *option, "--folder", str(folder)]), \
+                        patch.object(video, "settings", return_value=config), \
+                        patch.object(video, "find_ffmpeg", return_value="ffmpeg"), \
+                        patch.object(video, "decode_wav", return_value=Decimal(1)), \
+                        patch.object(video, "load_lyrics", side_effect=build) as lyrics, \
+                        patch.object(video, "find_font") as font, \
+                        patch.object(video, "render_video") as render:
+                    self.assertEqual(video.main(profile), 0)
+                self.assertTrue(mp3.with_suffix(".lyrics.json").exists())
+                self.assertFalse((folder / "result").exists())
+                self.assertFalse(list(folder.glob("*.mp4")))
+                font.assert_not_called()
+                render.assert_not_called()
+                lyrics.assert_called_once()
+
     def test_translation_model_missing_tokenizer_downloads_before_loading(self):
         tokenizer = object()
         model = Mock()

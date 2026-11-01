@@ -170,3 +170,6 @@ macro/upload/*
 # Generated music videos and intermediate results
 /macro/make_mp4/result/
 
+/macro/make_mp4/k_pop/
+/macro/make_mp4/eng_pop/
+/macro/make_mp4/merge_1hour/

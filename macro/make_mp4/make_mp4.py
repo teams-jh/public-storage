@@ -24,6 +24,17 @@ def global_number(name: str) -> Decimal:
     return Decimal(match.group(1))
 
 
+
+def global_string(name: str) -> str:
+    """프로젝트의 전역 상수에서 이 매크로의 문자열 설정을 읽어요."""
+    constants_file = Path(__file__).resolve().parents[2] / "src" / "constants" / "global_constants.ts"
+    source = constants_file.read_text(encoding="utf-8")
+    match = re.search(rf'export const {re.escape(name)}\s*=\s*"([^"\n]+)"\s*;', source)
+    if match is None:
+        raise ValueError(f"{name} 설정을 찾을 수 없어요: {constants_file}")
+    return match.group(1)
+
+
 def find_ffmpeg() -> str:
     """시스템 FFmpeg 또는 기존 매크로에서 쓰는 imageio-ffmpeg를 찾아요."""
     executable = shutil.which("ffmpeg")
@@ -109,9 +120,17 @@ def main() -> int:
 
     folder = Path(__file__).resolve().parent
     result_folder = folder / "result"
-    pairs = list(matching_pairs(folder))
+    try:
+        input_folder = folder / global_string("MAKE_MP4_INPUT_FOLDER")
+        if not input_folder.is_dir():
+            print(f"입력 폴더가 없어요. 폴더를 만들고 MP3와 PNG/JPG를 넣어 주세요: {input_folder}", file=sys.stderr)
+            return 1
+        pairs = list(matching_pairs(input_folder))
+    except (OSError, ValueError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
     if not pairs:
-        print("이름이 같은 MP3와 PNG/JPG 파일이 없어요.")
+        print(f"이름이 같은 MP3와 PNG/JPG 파일이 없어요: {input_folder}")
         return 0
 
     try:

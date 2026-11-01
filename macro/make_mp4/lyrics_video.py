@@ -287,37 +287,46 @@ def lyric_frame(background, cues, current_index, config, font_path, rect):
     available_height = slot_height * (1 - config["context_slot_gap_ratio"])
     maximum = max(1, round(image.height * config["font_ratio"]))
     minimum = max(1, round(image.height * config["min_font_ratio"]))
+    def line_layout(text, font_size, color):
+        font = ImageFont.truetype(font_path, font_size)
+        stroke = max(1, round(font_size * config["stroke_ratio"])) * config["stroke_multiplier"]
+        bold = max(0, round(font_size * config["bold_ratio"]))
+        padding = bold + stroke
+        lines = [" ".join(text.split())]
+        ascent, descent = font.getmetrics()
+        line_height = ascent + descent + padding * 2
+        line_gap = font_size * config["line_gap_ratio"]
+        return (lines, font, color, bold, padding, line_height, line_gap, line_height)
+
+    # 기본 크기는 영역 높이로만 정해요. 어느 문장이 길어도 다른 줄의 기본 크기는 같아요.
     for size in range(maximum, minimum - 1, -1):
-        layouts = []
-        for offset, cue in window:
-            groups = []
-            for language, font_size, color in (
-                (config["source_language"], size, config[f"{config['source_language']}_color"]),
-                (config["target_language"], max(1, min(size - 1, round(size * config["translation_font_scale"]))),
-                 config[f"{config['target_language']}_color"]),
-            ):
-                font = ImageFont.truetype(font_path, font_size)
-                stroke = max(1, round(font_size * config["stroke_ratio"])) * config["stroke_multiplier"]
-                bold = max(0, round(font_size * config["bold_ratio"]))
-                padding = bold + stroke
-                # 원문에 개행이 있어도 한 줄로 합치고, 너비를 넘으면 글자 크기를 줄여요.
-                lines = [" ".join(cue[language].split())]
-                ascent, descent = font.getmetrics()
-                line_height = ascent + descent + padding * 2
-                line_gap = font_size * config["line_gap_ratio"]
-                group_height = len(lines) * line_height + max(0, len(lines) - 1) * line_gap
-                groups.append((lines, font, color, bold, padding, line_height, line_gap, group_height))
-            language_gap = size * config["language_gap_ratio"]
-            total = sum(group[-1] for group in groups) + language_gap
-            fits_width = all(font.getlength(line) + padding * 2 <= width
-                             for lines, font, _, _, padding, _, _, _ in groups for line in lines)
-            if total > available_height or not fits_width:
-                break
-            layouts.append((offset, groups, total, language_gap))
-        else:
+        styles = (
+            (config["source_language"], size, config[f"{config['source_language']}_color"]),
+            (config["target_language"], max(1, min(size - 1, round(size * config["translation_font_scale"]))),
+             config[f"{config['target_language']}_color"]),
+        )
+        language_gap = size * config["language_gap_ratio"]
+        normal_height = sum(line_layout("", font_size, color)[-1] for _, font_size, color in styles)
+        if normal_height + language_gap <= available_height:
             break
     else:
-        raise ValueError("가사가 영역보다 길어요. JSON에서 짧은 구간으로 나누거나 --rect를 넓혀 주세요.")
+        raise ValueError("가사 영역의 높이가 부족해요. --rect를 넓혀 주세요.")
+
+    layouts = []
+    for offset, cue in window:
+        groups = []
+        for language, normal_size, color in styles:
+            # 각 가사·언어의 너비를 따로 맞춰 주변 가사와 다른 언어의 크기를 유지해요.
+            for font_size in range(normal_size, min(minimum, normal_size) - 1, -1):
+                group = line_layout(cue[language], font_size, color)
+                lines, font, _, _, padding, _, _, _ = group
+                if font.getlength(lines[0]) + padding * 2 <= width:
+                    break
+            else:
+                raise ValueError("가사가 영역보다 길어요. JSON에서 짧은 구간으로 나누거나 --rect를 넓혀 주세요.")
+            groups.append(group)
+        total = sum(group[-1] for group in groups) + language_gap
+        layouts.append((offset, groups, total, language_gap))
     for offset, groups, total, language_gap in layouts:
         top = y + (offset + radius + 0.5) * slot_height - total / 2
         alpha = round(255 * (1 if offset == 0 else config["context_opacity"]))
@@ -335,15 +344,35 @@ def lyric_frame(background, cues, current_index, config, font_path, rect):
     return Image.alpha_composite(image, overlay).convert("RGB")
 
 
+def decode_wav(ffmpeg, mp3, wav):
+    """가사 시간 검증과 영상에 사용할 PCM의 정확한 길이를 읽어요."""
+    subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(mp3), "-vn", "-c:a", "pcm_s16le", str(wav)], check=True)
+    with wave.open(str(wav), "rb") as audio:
+        return Decimal(audio.getnframes()) / Decimal(audio.getframerate())
+
+
+def create_json_only(ffmpeg, mp3, args, config):
+    path = mp3.with_suffix(".lyrics.json")
+    # 사용자가 수정한 파일과 미완성 파일도 옵션 3에서는 그대로 두어요.
+    if path.exists():
+        print(f"이미 있는 가사 JSON은 건너뛰어요: {path.name}")
+        return
+    if args.dry_run:
+        print(f"{mp3.name} → {path.name} / 가사 JSON만 만들어요")
+        return
+    with tempfile.TemporaryDirectory(prefix="lyrics_json_") as directory:
+        duration = decode_wav(ffmpeg or find_ffmpeg(), mp3, Path(directory) / "audio.wav")
+        load_lyrics(path, mp3, float(duration), args, config)
+    print(f"가사 JSON을 만들었어요: {path.name}", flush=True)
+
+
 def render_video(ffmpeg, mp3, image_path, output, args, config, rect, font_path):
     from PIL import Image, ImageOps
     with tempfile.TemporaryDirectory(prefix="make_mp4_") as directory:
         work = Path(directory)
         wav = work / "audio.wav"
         # PCM 반복으로 MP3 인코더 지연이 반복 경계마다 누적되지 않게 해요.
-        subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(mp3), "-vn", "-c:a", "pcm_s16le", str(wav)], check=True)
-        with wave.open(str(wav), "rb") as audio:
-            duration_decimal = Decimal(audio.getnframes()) / Decimal(audio.getframerate())
+        duration_decimal = decode_wav(ffmpeg, mp3, wav)
         duration = float(duration_decimal)
         cues = load_lyrics(mp3.with_suffix(".lyrics.json"), mp3, duration, args, config)
         print(f"가사 {len(cues)}구간을 준비했어요: {mp3.stem}", flush=True)
@@ -438,6 +467,9 @@ def repeat_video(ffmpeg, source, output, duration, config=None):
 
 
 def create_outputs(ffmpeg, mp3, image, result, args, config, font_path):
+    if args.output_option == "3":
+        create_json_only(ffmpeg, mp3, args, config)
+        return
     single = result / f"{mp3.stem}.mp4"
     hour = result / f"{mp3.stem}{config['hour_suffix']}.mp4"
     targets = ([single] if args.output_option == "1" else [hour] if args.output_option == "2" else [single, hour])
@@ -484,12 +516,12 @@ def main(profile="k_pop"):
     config = settings(profile)
     parser = argparse.ArgumentParser(description=__doc__)
     root = Path(__file__).resolve().parent
-    parser.add_argument("option", nargs="?", choices=("1", "2"), help="1: 한 곡만, 2: 1시간 반복만, 생략: 둘 다 만들어요")
+    parser.add_argument("option", nargs="?", choices=("1", "2", "3"), help="1: 한 곡만, 2: 1시간 반복만, 3: 없는 가사 JSON만, 생략: 영상 둘 다 만들어요")
     parser.add_argument("--folder", type=Path, default=root / config["input_folder"], help=f"음원과 이미지가 있는 폴더 (기본: {config['input_folder']})")
     parser.add_argument("--dry-run", action="store_true", help="파일과 길이만 확인해요. 다운로드·번역·파일 저장은 하지 않아요")
     parser.add_argument("--prepare-only", action="store_true", help="가사 JSON만 준비해요")
     length = parser.add_mutually_exclusive_group()
-    length.add_argument("--option", choices=("1", "2"), dest="named_option", help="1: 한 곡만, 2: 1시간 반복만")
+    length.add_argument("--option", choices=("1", "2", "3"), dest="named_option", help="1: 한 곡만, 2: 1시간 반복만, 3: 없는 가사 JSON만")
     length.add_argument("--single-pass", action="store_const", const="1", dest="named_option", help="옵션 1과 같아요")
     length.add_argument("--repeat-hour", action="store_const", const="2", dest="named_option", help="옵션 2와 같아요")
     parser.add_argument("--force", action="store_true", help="기존 MP4를 새로 만들어요. 가사 JSON은 재사용해요")
@@ -505,16 +537,33 @@ def main(profile="k_pop"):
     if args.option and args.named_option:
         parser.error("숫자 옵션과 --option/--single-pass/--repeat-hour 중 하나만 사용해 주세요.")
     args.output_option = args.option or args.named_option
+    if args.output_option == "3":
+        print("[시작] 옵션 3: 가사 JSON만 만들어요. 이미 있는 JSON은 건너뛰어요.", flush=True)
+    elif args.prepare_only:
+        print("[시작] 가사 JSON만 준비해요. 기존 JSON의 빈 번역은 이어서 채워요.", flush=True)
+    elif args.output_option == "1":
+        print("[시작] 옵션 1: 가사와 번역이 나오는 한 곡 MP4만 만들어요.", flush=True)
+    else:
+        minutes = config["repeat_duration_seconds"] / 60
+        gap = config["repeat_gap_seconds"]
+        if args.output_option == "2":
+            print(f"[시작] 옵션 2: 곡 전체를 반복해 {minutes:g}분을 넘는 MP4만 만들어요. 곡 사이에는 {gap}초 무음을 넣어요.", flush=True)
+        else:
+            print(f"[시작] 기본 실행: 한 곡 MP4와 {minutes:g}분을 넘는 반복 MP4를 모두 만들어요. 곡 사이에는 {gap}초 무음을 넣어요.", flush=True)
+    if args.dry_run:
+        print("[미리 확인] 실제 파일은 만들지 않아요.", flush=True)
     config["translation_backend"] = args.translation_backend
     folder = args.folder.resolve()
-    pairs = list(matching_pairs(folder))
+    json_only = args.output_option == "3"
+    pairs = ([(path, None) for path in sorted(folder.iterdir(), key=lambda path: path.name.casefold())
+              if path.is_file() and path.suffix.lower() == ".mp3"] if json_only else list(matching_pairs(folder)))
     if not pairs:
-        print("이름이 같은 MP3와 PNG/JPG 파일이 없어요.")
+        print("MP3 파일이 없어요." if json_only else "이름이 같은 MP3와 PNG/JPG 파일이 없어요.")
         return 0
-    ffmpeg = find_ffmpeg()
+    ffmpeg = None if json_only else find_ffmpeg()
     result = root / config["output_folder"]
-    font_path = None if args.dry_run else find_font(config, args.font)
-    if not args.dry_run:
+    font_path = None if args.dry_run or json_only else find_font(config, args.font)
+    if not args.dry_run and not json_only:
         result.mkdir(parents=True, exist_ok=True)
     failed = False
     for mp3, image in pairs:
