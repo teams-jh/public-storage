@@ -173,3 +173,6 @@ macro/upload/*
 /macro/make_mp4/k_pop/
 /macro/make_mp4/eng_pop/
 /macro/make_mp4/merge_1hour/
+/macro/make_mp4/backup/
+/macro/make_mp4/k_pop_merge/
+/macro/make_mp4/eng_pop_merge/
