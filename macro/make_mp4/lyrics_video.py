@@ -274,7 +274,7 @@ def lyric_window(cues, current_index, radius):
 
 
 def lyric_frame(background, cues, current_index, config, font_path, rect):
-    from PIL import Image, ImageColor, ImageDraw, ImageFont
+    from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageStat
 
     image = background.convert("RGBA")
     overlay = Image.new("RGBA", image.size)
@@ -353,15 +353,33 @@ def lyric_frame(background, cues, current_index, config, font_path, rect):
         extra = (height - sum(slot_sizes)) / len(slot_sizes)
         slot_sizes = [size + extra for size in slot_sizes]
 
+    stroke_color = config["stroke_color"]
+    fixed_outline = None if stroke_color == "auto" else ImageColor.getrgb(stroke_color)
+    threshold = config["contrast_threshold"]
+    dark = ImageColor.getrgb(config["contrast_dark_color"])
+    light = ImageColor.getrgb(config["contrast_light_color"])
+    brightness = background.convert("L")
+
     for offset, groups, total, language_gap in layouts:
         slot = offset + radius
         top = y + sum(slot_sizes[:slot]) + (slot_sizes[slot] - total) / 2
         alpha = round(255 * (1 if offset == 0 else config["context_opacity"]))
-        outline = (*ImageColor.getrgb(config["stroke_color"]), alpha)
         for lines, font, color, bold, padding, line_height, line_gap, group_height in groups:
-            fill = (*ImageColor.getrgb(color), alpha)
             for line in lines:
                 position = (x + width / 2, top + padding)
+                if color == "auto":
+                    left, upper, right, lower = draw.textbbox(position, line, font=font, anchor="mt",
+                                                              stroke_width=padding)
+                    region = brightness.crop((max(0, left), max(0, upper),
+                                              min(image.width, right), min(image.height, lower)))
+                    on_light_background = ImageStat.Stat(region).mean[0] >= threshold
+                    fill_color = dark if on_light_background else light
+                    contrasting_stroke = light if on_light_background else dark
+                else:
+                    fill_color = ImageColor.getrgb(color)
+                    contrasting_stroke = light if ImageColor.getcolor(color, "L") < threshold else dark
+                fill = (*fill_color, alpha)
+                outline = (*(fixed_outline or contrasting_stroke), alpha)
                 draw.text(position, line, font=font, anchor="mt", fill=fill,
                           stroke_width=padding, stroke_fill=outline)
                 draw.text(position, line, font=font, anchor="mt", fill=fill,
@@ -371,14 +389,14 @@ def lyric_frame(background, cues, current_index, config, font_path, rect):
     return Image.alpha_composite(image, overlay).convert("RGB")
 
 
-def decode_wav(ffmpeg, mp3, wav):
+def decode_wav(ffmpeg, mp3, wav, output_options=()):
     """가사 시간 검증과 영상에 사용할 PCM의 정확한 길이를 읽어요."""
-    subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(mp3), "-vn", "-c:a", "pcm_s16le", str(wav)], check=True)
+    subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(mp3), "-vn", "-c:a", "pcm_s16le", *output_options, str(wav)], check=True)
     with wave.open(str(wav), "rb") as audio:
         return Decimal(audio.getnframes()) / Decimal(audio.getframerate())
 
 
-def create_json_only(ffmpeg, mp3, args, config):
+def create_json_only(ffmpeg, mp3, args, config, wav_options=()):
     path = mp3.with_suffix(".lyrics.json")
     # 사용자가 수정한 파일과 미완성 파일도 옵션 3에서는 그대로 두어요.
     if path.exists():
@@ -388,9 +406,50 @@ def create_json_only(ffmpeg, mp3, args, config):
         print(f"{mp3.name} → {path.name} / 가사 JSON만 만들어요")
         return
     with tempfile.TemporaryDirectory(prefix="lyrics_json_") as directory:
-        duration = decode_wav(ffmpeg or find_ffmpeg(), mp3, Path(directory) / "audio.wav")
+        duration = decode_wav(ffmpeg or find_ffmpeg(), mp3, Path(directory) / "audio.wav", wav_options)
         load_lyrics(path, mp3, float(duration), args, config)
     print(f"가사 JSON을 만들었어요: {path.name}", flush=True)
+
+
+def render_track_frames(background, cues, duration, config, rect, font_path, work):
+    """한 곡의 배경과 가사 프레임을 한 번 만들고 각 프레임의 표시 길이를 돌려줘요."""
+    starts = [Decimal(str(cue["start"])) for cue in cues]
+    timeline = []
+    if starts[0] > 0:
+        blank = work / "blank.png"
+        background.save(blank)
+        timeline.append((blank, starts[0]))
+    for index, (start, end) in enumerate(zip(starts, starts[1:] + [duration])):
+        path = work / f"cue_{index}.png"
+        lyric_frame(background, cues, index, config, font_path, rect).save(path)
+        # 발화가 끝나도 유지하고 다음 가사의 발화 시작 시각에 교체해요.
+        timeline.append((path, end - start))
+    return timeline
+
+
+def encode_timeline(ffmpeg, timeline, audio_input, duration, config, work, output):
+    fps = int(global_number("MAKE_K_POP_VIDEO_FPS"))
+    entries = []
+    cursor = Decimal(0)
+    for path, length in timeline:
+        end = cursor + length
+        frames = round(end * fps) - round(cursor * fps)
+        name = path.relative_to(work).as_posix()
+        if frames > 0:
+            entries.extend([f"file '{name}'", f"option framerate {fps}",
+                            f"duration {Decimal(frames) / fps:.12f}"])
+        cursor = end
+    entries.extend([f"file '{name}'", f"option framerate {fps}"])
+    (work / "frames.txt").write_text("\n".join(entries) + "\n", encoding="utf-8")
+    subprocess.run([
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-stats", "-y",
+        "-f", "concat", "-safe", "0", "-i", "frames.txt", *audio_input,
+        "-map", "0:v:0", "-map", "1:a:0", "-t", str(duration),
+        "-vf", f"pad=ceil(iw/2)*2:ceil(ih/2)*2,fps={fps},tpad=stop_mode=clone:stop=-1", "-r", str(fps),
+        "-c:v", "libx264", "-preset", config["encoder_preset"], "-crf", str(config["crf"]),
+        "-tune", "stillimage", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a",
+        f"{int(global_number('MAKE_MP4_AUDIO_BITRATE_KBPS'))}k", "-movflags", "+faststart", str(output.resolve())
+    ], cwd=work, check=True)
 
 
 def render_video(ffmpeg, mp3, image_path, output, args, config, rect, font_path):
@@ -399,52 +458,18 @@ def render_video(ffmpeg, mp3, image_path, output, args, config, rect, font_path)
         work = Path(directory)
         wav = work / "audio.wav"
         # PCM 반복으로 MP3 인코더 지연이 반복 경계마다 누적되지 않게 해요.
-        duration_decimal = decode_wav(ffmpeg, mp3, wav)
-        duration = float(duration_decimal)
-        cues = load_lyrics(mp3.with_suffix(".lyrics.json"), mp3, duration, args, config)
+        duration = decode_wav(ffmpeg, mp3, wav)
+        cues = load_lyrics(mp3.with_suffix(".lyrics.json"), mp3, float(duration), args, config)
         print(f"가사 {len(cues)}구간을 준비했어요: {mp3.stem}", flush=True)
         if args.prepare_only:
             return
         with Image.open(image_path) as opened:
             background = ImageOps.exif_transpose(opened).convert("RGB")
-        background.save(work / "blank.png")
-        timeline = []
-        if cues[0]["start"] > 0:
-            timeline.append(("blank.png", cues[0]["start"]))
-        for index, cue in enumerate(cues):
-            name = f"cue_{index}.png"
-            frame = lyric_frame(background, cues, index, config, font_path, rect)
-            frame.save(work / name)
-            # 발화가 끝나도 유지하고 다음 가사의 발화 시작 시각에 교체해요.
-            display_end = cues[index + 1]["start"] if index + 1 < len(cues) else duration
-            timeline.append((name, display_end - cue["start"]))
-        loops = 1
-        fps = int(global_number("MAKE_K_POP_VIDEO_FPS"))
-        entries = []
-        for loop in range(loops):
-            cursor = duration_decimal * loop
-            for name, length in timeline:
-                end = cursor + Decimal(str(length))
-                frames = round(end * fps) - round(cursor * fps)
-                if frames > 0:
-                    entries.extend([f"file '{name}'", f"option framerate {fps}", f"duration {Decimal(frames) / fps:.12f}"])
-                cursor = end
-        entries.append(f"file '{timeline[-1][0]}'")
-        entries.append(f"option framerate {fps}")
-        (work / "frames.txt").write_text("\n".join(entries) + "\n", encoding="utf-8")
+        timeline = render_track_frames(background, cues, duration, config, rect, font_path, work)
         temporary = output.with_suffix(".partial.mp4")
-        print(f"MP4를 만들어요: {mp3.stem} / {loops}회 / 약 {duration * loops / 60:.1f}분", flush=True)
+        print(f"MP4를 만들어요: {mp3.stem} / 약 {duration / 60:.1f}분", flush=True)
         try:
-            subprocess.run([
-                ffmpeg, "-hide_banner", "-loglevel", "error", "-stats", "-y",
-                "-f", "concat", "-safe", "0", "-i", "frames.txt",
-                "-stream_loop", str(loops - 1), "-i", str(wav),
-                "-map", "0:v:0", "-map", "1:a:0", "-t", str(duration_decimal * loops),
-                "-vf", f"pad=ceil(iw/2)*2:ceil(ih/2)*2,fps={fps},tpad=stop_mode=clone:stop=-1", "-r", str(fps),
-                "-c:v", "libx264", "-preset", config["encoder_preset"], "-crf", str(config["crf"]),
-                "-tune", "stillimage", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a",
-                f"{int(global_number('MAKE_MP4_AUDIO_BITRATE_KBPS'))}k", "-movflags", "+faststart", str(temporary)
-            ], cwd=work, check=True)
+            encode_timeline(ffmpeg, timeline, ["-i", str(wav)], duration, config, work, temporary)
             temporary.replace(output)
         finally:
             temporary.unlink(missing_ok=True)

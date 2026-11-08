@@ -266,6 +266,26 @@ class LyricsTests(unittest.TestCase):
         self.assertEqual([cue["ko"] for _, cue in video.lyric_window(cues, 2, 1)], ["1", "2", "3"])
         self.assertEqual([cue["ko"] for _, cue in video.lyric_window(cues, 3, 1)], ["2", "3"])
 
+    def test_lyric_colors_follow_the_background_under_each_line(self):
+        from PIL import ImageDraw
+
+        background = Image.new("RGB", (1200, 600), "white")
+        draw = ImageDraw.Draw(background)
+        draw.rectangle((600, 300, 1199, 599), fill="black")
+        cue = dict(ko="가사", en="Lyrics")
+        for profile in ("k_pop", "eng_pop"):
+            with self.subTest(profile=profile):
+                config = video.settings(profile)
+                font = video.find_font(config, None)
+                original = ImageDraw.ImageDraw.text
+                with patch.object(ImageDraw.ImageDraw, "text", autospec=True, side_effect=original) as text:
+                    video.lyric_frame(background, [cue], 0, config, font, config["rect"])
+                source, translation = (call.kwargs for call in text.call_args_list[::2])
+                self.assertEqual(source["fill"], (0, 0, 0, 255))
+                self.assertEqual(source["stroke_fill"], (255, 255, 255, 255))
+                self.assertEqual(translation["fill"], (255, 255, 255, 255))
+                self.assertEqual(translation["stroke_fill"], (0, 0, 0, 255))
+
     def test_context_opacity_and_empty_first_slot(self):
         config = video.settings()
         font = video.find_font(config, None)

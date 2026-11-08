@@ -1,10 +1,25 @@
 # MP3와 이미지로 영상 만들기
 
-용도와 입력 폴더가 다른 세 실행 스크립트가 있어요.
+만들 영상에 맞는 스크립트를 실행해요.
 
 - `make_mp4.py`: `merge_1hour` 폴더의 MP3·이미지를 사용해요. 가사 없이 곡 전체를 반복해 1시간을 초과하는 `result/이름.mp4`를 만들어요. 기존처럼 FFmpeg만 있으면 실행할 수 있어요.
 - `make_k_pop.py`: `k_pop` 폴더의 MP3·이미지로 한영 가사 영상과 1시간 반복 영상을 만들어요. 결과는 `result/k_pop`에 저장해요.
 - `make_eng_pop.py`: `eng_pop` 폴더의 MP3·이미지로 영어 가사 아래에 더 작은 한글 번역을 넣어요. 결과는 `result/eng_pop`에 저장해요.
+
+## 여러 곡을 이어 붙이고 반복하기
+
+`k_pop_merge` 또는 `eng_pop_merge` 아래에 묶음마다 하위 폴더를 만들고, 곡별로 이름이 같은 MP3와 PNG 또는 JPG를 넣어요. 각 하위 폴더에서 파일명 순서대로 곡을 이어 붙여요. 예를 들어 솔지 → 장혜리 → 최유리 순서라면, 이 세 곡 순서를 한 묶음으로 반복해요. 곡이 바뀌면 해당 이미지와 가사가 표시돼요.
+
+```powershell
+python .\make_k_pop_merge.py             # 음원 옆에 없는 가사 JSON만 만들어요
+python .\make_k_pop_merge.py --merge     # 기존 가사 JSON으로 곡 묶음을 5회 반복해요
+python .\make_k_pop_merge.py --merge 2   # 곡 묶음을 2회 반복해요
+python .\make_eng_pop_merge.py --merge   # 영어 원문과 한글 번역으로 5회 반복해요
+```
+
+두 스크립트의 옵션은 같아요. `--merge`로 영상을 만들려면 묶음의 모든 곡에 이미지와 한영 가사 JSON이 있어야 해요. 곡 사이에 무음을 추가하지 않아요. 이미지 크기가 다르면 첫 곡의 이미지 크기에 맞춰 비율을 유지하고 남는 공간을 검게 채워요.
+
+하위 폴더별 결과는 `result/k_pop_merge/폴더이름.mp4` 또는 `result/eng_pop_merge/폴더이름.mp4`에 저장해요. 같은 폴더의 영상을 다시 만들면 새 영상이 완성된 뒤 기존 파일을 교체해요. 기본 반복 횟수는 `MAKE_POP_MERGE_REPEAT_COUNT`에서 조절해요.
 
 ## 영어 음악 만들기
 

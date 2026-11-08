@@ -166,8 +166,29 @@ export const MAKE_K_POP_VIDEO_FPS = 30;
 export const MAKE_MP4_AUDIO_BITRATE_KBPS = 192;
 
 /**
+ * 합치기 영상에서 하위 폴더의 곡 순서를 통째로 반복하는 기본 횟수(회).
+ * 값을 늘리면 최종 영상의 재생 길이, 인코딩 시간, 파일 크기가 늘어요.
+ * 실행할 때 --merge 뒤에 숫자를 넣으면 그 실행에만 다른 횟수를 적용해요.
+ */
+export const MAKE_POP_MERGE_REPEAT_COUNT = 5;
+
+/**
+ * 합치기 영상에 사용하는 공통 오디오 샘플링 주파수(Hz).
+ * 원본 음원의 주파수가 달라도 같은 형식으로 이어 붙일 수 있어요.
+ * 값을 바꾸면 출력 오디오의 주파수와 변환 중 임시 파일의 크기가 달라져요.
+ */
+export const MAKE_POP_MERGE_AUDIO_SAMPLE_RATE_HZ = 48000;
+
+/**
+ * 합치기 영상에 사용하는 공통 오디오 채널 수(개). 2는 스테레오예요.
+ * 값을 바꾸면 출력 오디오의 채널 구성과 원본 음원의 믹싱 방식이 달라져요.
+ */
+export const MAKE_POP_MERGE_AUDIO_CHANNELS = 2;
+
+/**
  * 가사 영상 생성 설정. Python에서 JSON으로 읽으므로 키와 문자열은 큰따옴표를 사용해요.
  * input_folder/output_folder: make_mp4 폴더 기준 입력/결과 경로. 바꾸면 검색할 음원과 저장할 영상의 위치가 달라져요.
+ * merge_input_folder/merge_output_folder: 합치기 모드의 make_mp4 기준 입력/결과 상대 경로. 바꾸면 하위 폴더 검색 위치와 합친 MP4의 저장 위치가 달라져요.
  * hour_suffix: 반복 영상 파일명에 붙일 문자열. 바꾸면 한 곡 영상과 구분하는 이름이 달라져요.
  * repeat_duration_seconds: 반복 영상이 반드시 초과해야 하는 기준 길이(초). 곡 전체 단위로 반복하며 마지막 곡을 자르지 않아요. 늘리면 반복 횟수와 파일 크기가 늘어나요.
  * repeat_gap_seconds: 반복되는 곡 사이의 무음 길이(초). 늘리면 곡 사이의 대기 시간이 길어져요. 첫 곡 앞과 마지막 곡 뒤에는 붙이지 않아요.
@@ -180,9 +201,11 @@ export const MAKE_MP4_AUDIO_BITRATE_KBPS = 192;
  * context_opacity: 이전·다음 가사의 불투명도(0~1). 낮추면 흐려지고 현재 가사는 항상 불투명하게 표시해요.
  * context_slot_gap_ratio: 각 가사 영역 높이 대비 비워 둘 간격 비율(0~1). 늘리면 가사 묶음 사이 간격이 넓어져요.
  * line_gap_ratio/language_gap_ratio: 글자 크기 대비 줄/언어 사이 간격 비율. 늘리면 더 넓게 배치해요.
- * ko_color/en_color/stroke_color: RGB 색상 문자열. 가사 및 외곽선 색상을 바꿔요.
+ * ko_color/en_color/stroke_color: RGB 색상 문자열 또는 "auto". 가사는 줄 뒤 배경에 맞춰 색을 고르고, 외곽선은 글자와 반대 밝기로 표시해요. RGB 값을 넣으면 색을 고정해요.
+ * contrast_dark_color/contrast_light_color: 자동 모드에 쓰는 어두운/밝은 RGB 색상 문자열. 두 색의 밝기 차이가 크면 배경과 글자를 구분하기 쉬워요.
+ * contrast_threshold: 자동 색상을 가르는 평균 회색조 밝기(0~255). 값을 높이면 밝은 글자를 더 자주 써요.
  * stroke_ratio: 글자 크기 대비 외곽선 두께 비율. 늘리면 배경과 더 뚜렷하게 구분돼요.
- * stroke_multiplier: 픽셀 단위로 계산한 흰색 테두리 두께의 배수(양의 정수). 2이면 기존 두께의 정확히 2배로 표시해요.
+ * stroke_multiplier: 픽셀 단위로 계산한 외곽선 두께의 배수(양의 정수). 2이면 기본 두께의 2배로 표시해요.
  * bold_ratio: 글자 크기 대비 같은 색으로 확장할 획 두께 비율(0 이상). 늘리면 Regular 폰트도 더 굵어지고 0이면 원래 굵기로 표시해요.
  * model/device/compute_type: 로컬 음성 인식 모델·장치·연산 형식. 큰 모델은 메모리와 시간이 더 필요해요.
  * beam_size: 음성 인식 탐색 후보 수(개). 늘리면 탐색 시간이 늘어나요.
@@ -200,6 +223,8 @@ export const MAKE_K_POP_LYRICS_CONFIG = {
   "target_label": "영어",
   "input_folder": "k_pop",
   "output_folder": "result/k_pop",
+  "merge_input_folder": "k_pop_merge",
+  "merge_output_folder": "result/k_pop_merge",
   "hour_suffix": "_1hour",
   "repeat_duration_seconds": 3600,
   "repeat_gap_seconds": 3,
@@ -213,9 +238,12 @@ export const MAKE_K_POP_LYRICS_CONFIG = {
   "context_slot_gap_ratio": 0.1,
   "line_gap_ratio": 0.3,
   "language_gap_ratio": 0.8,
-  "ko_color": "#000000",
-  "en_color": "#000000",
-  "stroke_color": "#ffffff",
+  "ko_color": "auto",
+  "en_color": "auto",
+  "stroke_color": "auto",
+  "contrast_dark_color": "#000000",
+  "contrast_light_color": "#ffffff",
+  "contrast_threshold": 128,
   "stroke_ratio": 0.02,
   "stroke_multiplier": 2,
   "bold_ratio": 0.04,
@@ -236,6 +264,7 @@ export const MAKE_K_POP_LYRICS_CONFIG = {
 /**
  * make_eng_pop.py의 전용 설정. MAKE_K_POP_LYRICS_CONFIG를 공유하고 아래 속성만 덮어써요.
  * input_folder/output_folder는 make_mp4 기준 입력/결과 경로이며 바꾸면 파일 검색·저장 위치가 달라져요.
+ * merge_input_folder/merge_output_folder는 make_mp4 기준 합치기 입력/결과 상대 경로이며 바꾸면 하위 폴더 검색·저장 위치가 달라져요.
  * source_language/target_language는 영어 인식·한글 번역 방향, source_label/target_label은 안내 언어 이름이에요.
  * translation_model은 로컬 영어→한국어 번역 모델 ID예요. 바꾸면 번역 품질·다운로드 용량이 달라져요.
  * translation_family는 번역 모델 종류(marian/nllb), translation_source_tag/translation_target_tag는 NLLB 원문/번역 언어 태그예요. 바꾸면 불러올 모델 구조와 번역 언어가 달라져요.
@@ -245,6 +274,8 @@ export const MAKE_K_POP_LYRICS_CONFIG = {
 export const MAKE_ENG_POP_LYRICS_CONFIG = {
   "input_folder": "eng_pop",
   "output_folder": "result/eng_pop",
+  "merge_input_folder": "eng_pop_merge",
+  "merge_output_folder": "result/eng_pop_merge",
   "source_language": "en",
   "target_language": "ko",
   "source_label": "영어",
