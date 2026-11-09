@@ -3,6 +3,7 @@
 import argparse
 from decimal import Decimal
 from itertools import chain, repeat
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -32,12 +33,55 @@ def positive_count(value):
     return count
 
 
-def merge_folder(ffmpeg, tracks, output, args, config, wav_options):
+def automatic_repeat_count(duration, sample_rate):
+    frames = round(duration * sample_rate)
+    if frames <= 0:
+        raise ValueError("재생할 수 있는 소리가 없어요. MP3 파일을 확인해 주세요.")
+    target_frames = round(global_number("MAKE_POP_MERGE_MIN_DURATION_SECONDS") * sample_rate)
+    return (target_frames + frames - 1) // frames
+
+
+def print_merge_plan(output, songs, count):
+    print(f"{output.name} / {' → '.join(mp3.stem for mp3 in songs)} / 전체 {count}회", flush=True)
+
+
+def normalize_track(ffmpeg, source, output, target_loudness, max_true_peak):
+    """곡 전체를 측정한 뒤 한 가지 게인을 적용해 곡 안의 음량 차이를 유지해요."""
+    command = [ffmpeg, "-nostdin", "-hide_banner", "-i", str(source)]
+    measured = subprocess.run(
+        [*command, "-af", "loudnorm=print_format=json", "-f", "null", "-"],
+        stderr=subprocess.PIPE, encoding="utf-8", errors="replace", check=True,
+    )
+    report = re.search(r'\{\s*"input_i"\s*:[^}]+\}', measured.stderr)
+    if report is None:
+        raise RuntimeError("곡의 음량을 읽을 수 없어요. FFmpeg에서 loudnorm 필터를 쓸 수 있는지 확인해 주세요.")
+
+    stats = json.loads(report.group())
+    loudness = Decimal(stats["input_i"])
+    true_peak = Decimal(stats["input_tp"])
+    # 무음이나 측정 기준보다 짧은 곡에는 증폭을 적용하지 않아요.
+    target_gain = target_loudness - loudness if loudness.is_finite() else Decimal(0)
+    gain = min(target_gain, max_true_peak - true_peak)
+    if gain == 0:
+        source.replace(output)
+        return
+
+    subprocess.run(
+        [*command, "-v", "error", "-af", f"volume={gain:f}dB", "-c:a", "pcm_s16le", str(output)],
+        check=True,
+    )
+    source.unlink()
+
+
+def merge_folder(ffmpeg, tracks, output, args, config, wav_options, *, sample_rate, count):
     from PIL import Image, ImageOps
 
     font_path = find_font(config, args.font)
+    target_loudness = global_number("MAKE_POP_MERGE_TARGET_LOUDNESS_LUFS")
+    max_true_peak = global_number("MAKE_POP_MERGE_MAX_TRUE_PEAK_DBTP")
     with tempfile.TemporaryDirectory(prefix="lyrics_merge_") as directory:
         work = Path(directory)
+        source_wav = work / "source.wav"
         audio_entries = []
         timeline = []
         duration = Decimal(0)
@@ -46,7 +90,8 @@ def merge_folder(ffmpeg, tracks, output, args, config, wav_options):
             track = work / str(index)
             track.mkdir()
             wav = track / "audio.wav"
-            track_duration = decode_wav(ffmpeg, mp3, wav, wav_options)
+            track_duration = decode_wav(ffmpeg, mp3, source_wav, wav_options)
+            normalize_track(ffmpeg, source_wav, wav, target_loudness, max_true_peak)
             cues = load_lyrics(mp3.with_suffix(".lyrics.json"), mp3, float(track_duration), args, config)
             with Image.open(image) as opened:
                 background = ImageOps.exif_transpose(opened).convert("RGB")
@@ -58,14 +103,17 @@ def merge_folder(ffmpeg, tracks, output, args, config, wav_options):
             audio_entries.append(f"file '{wav.relative_to(work).as_posix()}'\n")
             duration += track_duration
 
-        (work / "audio.txt").write_text("".join(audio_entries) * args.merge, encoding="utf-8")
-        repeated_frames = chain.from_iterable(repeat(timeline, args.merge))
+        if count is None:
+            count = automatic_repeat_count(duration, sample_rate)
+        print_merge_plan(output, (mp3 for mp3, _ in tracks), count)
+        (work / "audio.txt").write_text("".join(audio_entries) * count, encoding="utf-8")
+        repeated_frames = chain.from_iterable(repeat(timeline, count))
         audio_input = ["-f", "concat", "-i", "audio.txt"]
         output.parent.mkdir(parents=True, exist_ok=True)
         # 완성된 영상만 같은 드라이브의 결과 폴더로 옮겨요.
         with tempfile.TemporaryDirectory(prefix="merge_", dir=output.parent) as staging:
             temporary = Path(staging) / "output.mp4"
-            encode_timeline(ffmpeg, repeated_frames, audio_input, duration * args.merge, config, work, temporary)
+            encode_timeline(ffmpeg, repeated_frames, audio_input, duration * count, config, work, temporary)
             temporary.replace(output)
 
 
@@ -124,11 +172,11 @@ def write_timestamps(folders, output, sample_rate, wav_options, dry_run):
 def main(profile="k_pop"):
     config = settings(profile)
     root = Path(__file__).resolve().parent
-    default_count = positive_count(str(global_number("MAKE_POP_MERGE_REPEAT_COUNT")))
+    automatic_repeat = object()
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--merge", nargs="?", type=positive_count, const=default_count, metavar="횟수",
-                      help=f"기존 가사 JSON으로 영상을 만들어요. 기본 반복 횟수는 {default_count}회예요.")
+    mode.add_argument("--merge", nargs="?", type=positive_count, const=automatic_repeat, metavar="횟수",
+                      help="기존 가사 JSON으로 영상을 만들어요. 횟수를 생략하면 최소 재생 시간에 맞춰 반복해요.")
     mode.add_argument("--timestamp", action="store_true", help="폴더별 곡 시작 시각을 텍스트 파일 하나에 저장해요.")
     parser.add_argument("--folder", type=Path, default=root / config["merge_input_folder"],
                         help="곡을 모아 둔 하위 폴더들이 있는 경로예요.")
@@ -179,10 +227,19 @@ def main(profile="k_pop"):
             if missing:
                 raise ValueError(f"--merge 없이 먼저 실행해 가사 JSON을 만들어 주세요. {', '.join(missing)}")
             output = result / f"{folder.name}.mp4"
-            print(f"{output.name} / {' → '.join(mp3.stem for mp3 in songs)} / 전체 {args.merge}회", flush=True)
-            if not args.dry_run:
+            count = None if args.merge is automatic_repeat else args.merge
+            if args.dry_run:
+                if count is None:
+                    ffmpeg = ffmpeg or find_ffmpeg()
+                    with tempfile.TemporaryDirectory(prefix="merge_preview_") as directory:
+                        wav = Path(directory) / "audio.wav"
+                        duration = sum(decode_wav(ffmpeg, mp3, wav, wav_options) for mp3 in songs)
+                    count = automatic_repeat_count(duration, sample_rate)
+                print_merge_plan(output, songs, count)
+            else:
                 ffmpeg = ffmpeg or find_ffmpeg()
-                merge_folder(ffmpeg, [(mp3, images[mp3]) for mp3 in songs], output, args, config, wav_options)
+                merge_folder(ffmpeg, [(mp3, images[mp3]) for mp3 in songs], output, args, config, wav_options,
+                             sample_rate=sample_rate, count=count)
                 print(f"영상을 만들었어요. {output}", flush=True)
         except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
             failed = True

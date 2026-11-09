@@ -12,14 +12,16 @@
 
 ```powershell
 python .\make_k_pop_merge.py             # 음원 옆에 없는 가사 JSON만 만들어요
-python .\make_k_pop_merge.py --merge     # 기존 가사 JSON으로 곡 묶음을 5회 반복해요
+python .\make_k_pop_merge.py --merge     # 기존 가사 JSON으로 1시간 이상 재생되는 영상을 만들어요
 python .\make_k_pop_merge.py --merge 2   # 곡 묶음을 2회 반복해요
-python .\make_eng_pop_merge.py --merge   # 영어 원문과 한글 번역으로 5회 반복해요
+python .\make_eng_pop_merge.py --merge   # 영어 원문과 한글 번역으로 1시간 이상 재생되는 영상을 만들어요
 ```
 
 두 스크립트의 옵션은 같아요. `--merge`로 영상을 만들려면 묶음의 모든 곡에 이미지와 한영 가사 JSON이 있어야 해요. 곡 사이에 무음을 추가하지 않아요. 이미지 크기가 다르면 첫 곡의 이미지 크기에 맞춰 비율을 유지하고 남는 공간을 검게 채워요.
 
-하위 폴더별 결과는 `result/k_pop_merge/폴더이름.mp4` 또는 `result/eng_pop_merge/폴더이름.mp4`에 저장해요. 같은 폴더의 영상을 다시 만들면 새 영상이 완성된 뒤 기존 파일을 교체해요. 기본 반복 횟수는 `MAKE_POP_MERGE_REPEAT_COUNT`에서 조절해요.
+횟수 없이 `--merge`를 쓰면 하위 폴더마다 1시간 이상을 채우는 최소 횟수만큼 곡 묶음을 반복해요. 한 묶음이 20분이면 3회, 1시간 이상이면 1회 재생해요. 최소 재생 시간은 `MAKE_POP_MERGE_MIN_DURATION_SECONDS`에서 조절해요.
+
+하위 폴더별 결과는 `result/k_pop_merge/폴더이름.mp4` 또는 `result/eng_pop_merge/폴더이름.mp4`에 저장해요. 같은 폴더의 영상을 다시 만들면 새 영상이 완성된 뒤 기존 파일을 교체해요.
 
 ## 영어 음악 만들기
 

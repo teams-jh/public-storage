@@ -18,7 +18,7 @@ def global_number(name: str) -> Decimal:
     """프로젝트의 전역 상수에서 이 매크로의 숫자 설정을 읽어요."""
     constants_file = Path(__file__).resolve().parents[2] / "src" / "constants" / "global_constants.ts"
     source = constants_file.read_text(encoding="utf-8")
-    match = re.search(rf"export const {re.escape(name)}\s*=\s*(\d+(?:\.\d+)?)\s*;", source)
+    match = re.search(rf"export const {re.escape(name)}\s*=\s*(-?\d+(?:\.\d+)?)\s*;", source)
     if match is None:
         raise ValueError(f"{name} 설정을 찾을 수 없어요: {constants_file}")
     return Decimal(match.group(1))

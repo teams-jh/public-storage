@@ -166,11 +166,11 @@ export const MAKE_K_POP_VIDEO_FPS = 30;
 export const MAKE_MP4_AUDIO_BITRATE_KBPS = 192;
 
 /**
- * 합치기 영상에서 하위 폴더의 곡 순서를 통째로 반복하는 기본 횟수(회).
- * 값을 늘리면 최종 영상의 재생 길이, 인코딩 시간, 파일 크기가 늘어요.
- * 실행할 때 --merge 뒤에 숫자를 넣으면 그 실행에만 다른 횟수를 적용해요.
+ * 합치기 영상에서 --merge의 반복 횟수를 생략했을 때 적용하는 최소 재생 시간(초).
+ * 하위 폴더의 곡 묶음을 통째로 반복해 이 시간 이상을 채워요.
+ * 값을 높이면 필요한 반복 횟수와 인코딩 시간, 파일 크기가 늘어날 수 있어요.
  */
-export const MAKE_POP_MERGE_REPEAT_COUNT = 5;
+export const MAKE_POP_MERGE_MIN_DURATION_SECONDS = 3600;
 
 /**
  * 합치기 영상에 사용하는 공통 오디오 샘플링 주파수(Hz).
@@ -184,6 +184,18 @@ export const MAKE_POP_MERGE_AUDIO_SAMPLE_RATE_HZ = 48000;
  * 값을 바꾸면 출력 오디오의 채널 구성과 원본 음원의 믹싱 방식이 달라져요.
  */
 export const MAKE_POP_MERGE_AUDIO_CHANNELS = 2;
+
+/**
+ * 합치기 영상에서 곡마다 맞출 평균 체감 음량(LUFS).
+ * 값을 높이면 곡이 더 크게 들려요. 가장 큰 소리가 제한을 넘으면 증폭을 줄여요.
+ */
+export const MAKE_POP_MERGE_TARGET_LOUDNESS_LUFS = -16;
+
+/**
+ * 합치기 영상의 오디오 변환 전 실제 최대 피크 상한(dBTP).
+ * 값을 낮추면 소리가 잘리는 것을 막을 여유가 늘고, 피크가 큰 곡은 목표 음량보다 작게 들릴 수 있어요.
+ */
+export const MAKE_POP_MERGE_MAX_TRUE_PEAK_DBTP = -2;
 
 /**
  * 한국 음악 합치기 타임스탬프를 저장할 파일 경로(단위: macro/make_mp4 기준 상대 경로).
