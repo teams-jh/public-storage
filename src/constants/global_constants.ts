@@ -186,6 +186,30 @@ export const MAKE_POP_MERGE_AUDIO_SAMPLE_RATE_HZ = 48000;
 export const MAKE_POP_MERGE_AUDIO_CHANNELS = 2;
 
 /**
+ * 한국 음악 합치기 타임스탬프를 저장할 파일 경로(단위: macro/make_mp4 기준 상대 경로).
+ * 값을 바꾸면 --timestamp 보고서의 저장 위치와 파일명이 달라져요.
+ */
+export const MAKE_K_POP_MERGE_TIMESTAMP_OUTPUT = "result/timestamp_result.txt";
+
+/**
+ * 영어 음악 합치기 타임스탬프를 저장할 파일 경로(단위: macro/make_mp4 기준 상대 경로).
+ * 값을 바꾸면 영어 음악 --timestamp 보고서의 저장 위치와 파일명이 달라져요.
+ */
+export const MAKE_ENG_POP_MERGE_TIMESTAMP_OUTPUT = "result/eng_pop_timestamp_result.txt";
+
+/**
+ * 타임스탬프에서 한 시간을 환산하는 기준(단위: 초/시간).
+ * 값을 바꾸면 누적 재생 시간에서 시간으로 넘어가는 경계가 달라져요.
+ */
+export const MAKE_POP_MERGE_SECONDS_PER_HOUR = 3600;
+
+/**
+ * 타임스탬프에서 한 분을 환산하는 기준(단위: 초/분).
+ * 값을 바꾸면 누적 재생 시간에서 분으로 넘어가는 경계가 달라져요.
+ */
+export const MAKE_POP_MERGE_SECONDS_PER_MINUTE = 60;
+
+/**
  * 가사 영상 생성 설정. Python에서 JSON으로 읽으므로 키와 문자열은 큰따옴표를 사용해요.
  * input_folder/output_folder: make_mp4 폴더 기준 입력/결과 경로. 바꾸면 검색할 음원과 저장할 영상의 위치가 달라져요.
  * merge_input_folder/merge_output_folder: 합치기 모드의 make_mp4 기준 입력/결과 상대 경로. 바꾸면 하위 폴더 검색 위치와 합친 MP4의 저장 위치가 달라져요.

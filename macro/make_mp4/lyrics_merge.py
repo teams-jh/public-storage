@@ -4,6 +4,7 @@ import argparse
 from decimal import Decimal
 from itertools import chain, repeat
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -18,7 +19,7 @@ from lyrics_video import (
     render_track_frames,
     settings,
 )
-from make_mp4 import find_ffmpeg, global_number, matching_pairs
+from make_mp4 import find_ffmpeg, global_number, global_string, matching_pairs
 
 
 def positive_count(value):
@@ -68,16 +69,70 @@ def merge_folder(ffmpeg, tracks, output, args, config, wav_options):
             temporary.replace(output)
 
 
+def folder_tracks(root):
+    folders = sorted((path for path in root.iterdir() if path.is_dir()), key=lambda path: path.name.casefold())
+    for folder in folders:
+        songs = sorted(
+            (path for path in folder.iterdir() if path.is_file() and path.suffix.lower() == ".mp3"),
+            key=lambda path: path.name.casefold(),
+        )
+        if songs:
+            yield folder, songs
+
+
+def write_timestamps(folders, output, sample_rate, wav_options, dry_run):
+    seconds_per_hour = int(global_number("MAKE_POP_MERGE_SECONDS_PER_HOUR"))
+    seconds_per_minute = int(global_number("MAKE_POP_MERGE_SECONDS_PER_MINUTE"))
+    ffmpeg = None
+    sections = []
+    for folder, songs in folders:
+        ffmpeg = ffmpeg or find_ffmpeg()
+        elapsed_frames = 0
+        lines = [f"[{folder.name}]"]
+        with tempfile.TemporaryDirectory(prefix="timestamps_") as directory:
+            wav = Path(directory) / "audio.wav"
+            for mp3 in songs:
+                hours, remaining = divmod(elapsed_frames // sample_rate, seconds_per_hour)
+                minutes, seconds = divmod(remaining, seconds_per_minute)
+                name = re.sub(r"^\d+\.\s+", "", mp3.stem).split(" - ", 1)[0]
+                lines.append(f"{hours:02d}:{minutes:02d}:{seconds:02d} {name}")
+                try:
+                    duration = decode_wav(ffmpeg, mp3, wav, wav_options)
+                except (OSError, subprocess.CalledProcessError) as exc:
+                    raise ValueError(
+                        f"{folder.name}/{mp3.name}의 재생 시간을 읽을 수 없어요. MP3 파일을 확인해 주세요."
+                    ) from exc
+                # PCM 프레임 수를 누적해 소수점 오차로 초 경계가 어긋나는 일을 막아요.
+                elapsed_frames += round(duration * sample_rate)
+        sections.append("\n".join(lines))
+
+    if not sections:
+        return False
+    report = "\n\n".join(sections) + "\n"
+    if dry_run:
+        print(report, end="")
+    else:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="timestamps_", dir=output.parent) as staging:
+            temporary = Path(staging) / output.name
+            temporary.write_text(report, encoding="utf-8")
+            temporary.replace(output)
+        print(f"타임스탬프를 저장했어요. {output}")
+    return True
+
+
 def main(profile="k_pop"):
     config = settings(profile)
     root = Path(__file__).resolve().parent
     default_count = positive_count(str(global_number("MAKE_POP_MERGE_REPEAT_COUNT")))
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--merge", nargs="?", type=positive_count, const=default_count, metavar="횟수",
-                        help=f"기존 가사 JSON으로 영상을 만들어요. 기본 반복 횟수는 {default_count}회예요.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--merge", nargs="?", type=positive_count, const=default_count, metavar="횟수",
+                      help=f"기존 가사 JSON으로 영상을 만들어요. 기본 반복 횟수는 {default_count}회예요.")
+    mode.add_argument("--timestamp", action="store_true", help="폴더별 곡 시작 시각을 텍스트 파일 하나에 저장해요.")
     parser.add_argument("--folder", type=Path, default=root / config["merge_input_folder"],
                         help="곡을 모아 둔 하위 폴더들이 있는 경로예요.")
-    parser.add_argument("--dry-run", action="store_true", help="만들 파일과 곡 순서만 보여줘요.")
+    parser.add_argument("--dry-run", action="store_true", help="결과를 저장하기 전에 미리 봐요.")
     parser.add_argument("--offline", action="store_true", help="가사를 만들 때 모델을 내려받거나 번역을 요청하지 않아요.")
     parser.add_argument("--font", type=Path, help="한글 TTF/OTF 폰트 경로예요.")
     parser.add_argument("--rect", type=parse_rect, default=tuple(config["rect"]), help="가사 영역 x,y,너비,높이 비율이에요.")
@@ -90,19 +145,20 @@ def main(profile="k_pop"):
     config["translation_backend"] = args.translation_backend
     args.offline = args.offline or args.merge is not None
     result = root / config["merge_output_folder"]
-    wav_options = ("-ar", str(global_number("MAKE_POP_MERGE_AUDIO_SAMPLE_RATE_HZ")),
+    sample_rate = int(global_number("MAKE_POP_MERGE_AUDIO_SAMPLE_RATE_HZ"))
+    wav_options = ("-ar", str(sample_rate),
                    "-ac", str(global_number("MAKE_POP_MERGE_AUDIO_CHANNELS")))
+
+    folders = folder_tracks(args.folder)
+    if args.timestamp:
+        output = root / global_string(f"MAKE_{profile.upper()}_MERGE_TIMESTAMP_OUTPUT")
+        if not write_timestamps(folders, output, sample_rate, wav_options, args.dry_run):
+            print(f"하위 폴더에 MP3가 없어요. {args.folder}")
+        return 0
 
     ffmpeg = None
     found = failed = False
-    folders = sorted((path for path in args.folder.iterdir() if path.is_dir()), key=lambda path: path.name.casefold())
-    for folder in folders:
-        songs = sorted(
-            (path for path in folder.iterdir() if path.is_file() and path.suffix.lower() == ".mp3"),
-            key=lambda path: path.name.casefold(),
-        )
-        if not songs:
-            continue
+    for folder, songs in folders:
         found = True
         if args.merge is None:
             for mp3 in songs:
