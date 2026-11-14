@@ -67,6 +67,14 @@ def progress_hook(d: dict):
         print("\n  🔄 원본 다운로드 완료! MP3 변환 및 태그 작업 중...")
 
 
+def video_progress_hook(d: dict):
+    """MP4 다운로드 진행률과 병합 안내를 표시해요."""
+    if d.get("status") == "finished":
+        print("\n  🔄 영상 다운로드를 마쳤어요. MP4 파일을 정리하고 있어요.")
+    else:
+        progress_hook(d)
+
+
 def load_links_from_file(file_path: Path) -> List[str]:
     """
     파일에서 주석(#, //)과 빈 줄을 제외한 유효한 YouTube URL 목록을 읽어옵니다.
@@ -122,11 +130,21 @@ def download_youtube_to_mp3(
     url: str,
     output_dir: Path,
     quality: str = "192",
-    allow_playlist: bool = False
+    allow_playlist: bool = False,
+    option: Optional[str] = None,
 ) -> bool:
     """
     단일 YouTube URL을 받아 MP3 파일로 변환 및 다운로드합니다.
     """
+    if option == "mp4":
+        video_success = download_youtube_to_mp3(
+            url, output_dir, quality, allow_playlist, option="mp4_only"
+        )
+        audio_success = download_youtube_to_mp3(
+            url, output_dir, quality, allow_playlist
+        )
+        return video_success and audio_success
+
     try:
         import yt_dlp
     except ImportError:
@@ -175,10 +193,23 @@ def download_youtube_to_mp3(
         "progress_hooks": [progress_hook],
     }
 
+    if option == "mp4_only":
+        # MP3 기록과 분리해 같은 영상의 두 형식을 각각 받을 수 있어요.
+        ydl_opts.update({
+            "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]",
+            "merge_output_format": "mp4",
+            "postprocessors": [{"key": "FFmpegMetadata", "add_metadata": True}],
+            "download_archive": str(output_dir / ".download_archive_mp4.txt"),
+            "progress_hooks": [video_progress_hook],
+        })
+
     print(f"\n==================================================")
     print(f"🔗 링크: {url}")
     print(f"📁 저장 경로: {output_dir.resolve()}")
-    print(f"🎵 음질 설정: {quality} kbps")
+    if option == "mp4_only":
+        print("🎬 저장 형식: MP4")
+    else:
+        print(f"🎵 음질 설정: {quality} kbps")
     print(f"==================================================")
 
     try:
@@ -197,7 +228,7 @@ def download_youtube_to_mp3(
             print(f"\n🎬 제목: {title}")
             print(f"👤 채널: {uploader} | ⏱️ {mins}분 {secs}초")
 
-        print(f"✅ MP3 변환 및 다운로드가 완료되었어요!\n")
+        print("✅ MP4 다운로드를 마쳤어요!\n" if option == "mp4_only" else "✅ MP3 변환 및 다운로드가 완료되었어요!\n")
         return True
 
     except Exception as e:
@@ -211,6 +242,7 @@ def download_multiple_links(
     quality: str = "192",
     allow_playlist: bool = False,
     source_file: Optional[Path] = None,
+    option: Optional[str] = None,
 ) -> int:
     """
     여러 YouTube 링크를 순차적으로 다운로드합니다.
@@ -228,6 +260,7 @@ def download_multiple_links(
             output_dir=output_dir,
             quality=quality,
             allow_playlist=allow_playlist,
+            option=option,
         )
         if success:
             successful_links.append(url)
@@ -242,7 +275,7 @@ def download_multiple_links(
     return len(successful_links)
 
 
-def interactive_mode(output_dir: Path, quality: str = "192"):
+def interactive_mode(output_dir: Path, quality: str = "192", option: Optional[str] = None):
     """
     직접 콘솔에서 링크를 입력받아 반복 다운로드하는 대화형 모드입니다.
     """
@@ -267,7 +300,7 @@ def interactive_mode(output_dir: Path, quality: str = "192"):
             print("\n👋 프로그램을 종료합니다.")
             break
 
-        download_youtube_to_mp3(url_input, output_dir=output_dir, quality=quality)
+        download_youtube_to_mp3(url_input, output_dir=output_dir, quality=quality, option=option)
 
 
 def main():
@@ -303,6 +336,12 @@ def main():
         help="재생목록 URL인 경우 전체 재생목록 다운로드 허용",
     )
 
+    parser.add_argument(
+        "--option",
+        choices=["mp4", "mp4_only"],
+        help="mp4: MP4와 MP3를 모두 다운로드해요. mp4_only: MP4만 다운로드해요. 생략하면 MP3만 다운로드해요.",
+    )
+
     args = parser.parse_args()
     target_output_dir = Path(args.output)
 
@@ -321,6 +360,7 @@ def main():
             output_dir=target_output_dir,
             quality=args.quality,
             allow_playlist=args.playlist,
+            option=args.option,
             source_file=file_path,
         )
         return
@@ -332,6 +372,7 @@ def main():
             output_dir=target_output_dir,
             quality=args.quality,
             allow_playlist=args.playlist,
+            option=args.option,
         )
         return
 
@@ -355,13 +396,14 @@ def main():
                 output_dir=target_output_dir,
                 quality=args.quality,
                 allow_playlist=args.playlist,
+                option=args.option,
                 source_file=DEFAULT_LINK_FILE,
             )
             return
 
     # 4. link.txt에 유효한 링크가 없는 경우: 직접 입력 대화형 모드로 실행
     print("\nℹ️ 'link.txt'에 다운로드할 링크가 없습니다.")
-    interactive_mode(output_dir=target_output_dir, quality=args.quality)
+    interactive_mode(output_dir=target_output_dir, quality=args.quality, option=args.option)
 
 
 if __name__ == "__main__":
