@@ -234,7 +234,8 @@ export const MAKE_POP_MERGE_SECONDS_PER_MINUTE = 60;
  * source_language/target_language: 인식할 원문/번역 언어 코드. source_label/target_label은 안내에 표시할 언어 이름이에요. 바꾸면 인식·번역 방향과 화면의 위아래 언어가 달라져요.
  * translation_font_scale: 원문 글자 크기 대비 번역 글자 크기 비율(0~1). 줄이면 아래쪽 번역이 더 작게 보여요.
  * context_radius: 현재 가사 앞뒤에 표시할 가사 개수(각 방향 기준 개). 1이면 이전·현재·다음 최대 3개를 표시해요.
- * context_opacity: 이전·다음 가사의 불투명도(0~1). 낮추면 흐려지고 현재 가사는 항상 불투명하게 표시해요.
+ * context_opacity: 이전·다음 가사와 발화 전 대기 가사의 불투명도(0~1). 낮추면 흐려지고 노래 중인 현재 가사는 불투명하게 표시해요.
+ * waiting_min_gap_seconds: 곡 중간에 다음 가사 대기 화면으로 전환할 최소 간주 길이(초, 0 이상). 낮추면 짧은 쉼에도 전환해요. 첫 가사 전에는 길이와 관계없이 대기 가사를 보여주고, 마지막 가사 뒤에는 마지막 화면을 유지해요.
  * context_slot_gap_ratio: 각 가사 영역 높이 대비 비워 둘 간격 비율(0~1). 늘리면 가사 묶음 사이 간격이 넓어져요.
  * line_gap_ratio/language_gap_ratio: 글자 크기 대비 줄/언어 사이 간격 비율. 늘리면 더 넓게 배치해요.
  * ko_color/en_color/stroke_color: RGB 색상 문자열 또는 "auto". 가사는 줄 뒤 배경에 맞춰 색을 고르고, 외곽선은 글자와 반대 밝기로 표시해요. RGB 값을 넣으면 색을 고정해요.
@@ -271,6 +272,7 @@ export const MAKE_K_POP_LYRICS_CONFIG = {
   "translation_font_scale": 0.85,
   "context_radius": 1,
   "context_opacity": 0.25,
+  "waiting_min_gap_seconds": 2,
   "context_slot_gap_ratio": 0.1,
   "line_gap_ratio": 0.3,
   "language_gap_ratio": 0.8,

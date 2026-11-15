@@ -314,7 +314,7 @@ def wrap_lyric_line(text, font, width):
     return best[0][-1] or [""]
 
 
-def lyric_frame(background, cues, current_index, config, font_path, rect):
+def lyric_frame(background, cues, current_index, config, font_path, rect, *, waiting=False):
     from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageStat
 
     image = background.convert("RGBA")
@@ -420,9 +420,12 @@ def lyric_frame(background, cues, current_index, config, font_path, rect):
     brightness = background.convert("L")
 
     for offset, groups, total, language_gap in layouts:
+        # 이전 가사의 자리를 남겨 대기→발화 전환 때 긴 가사도 위치가 바뀌지 않게 해요.
+        if waiting and offset < 0:
+            continue
         slot = offset + radius
         top = y + sum(slot_sizes[:slot]) + (slot_sizes[slot] - total) / 2
-        alpha = round(255 * (1 if offset == 0 else config["context_opacity"]))
+        alpha = round(255 * (1 if offset == 0 and not waiting else config["context_opacity"]))
         for lines, font, color, bold, padding, line_height, line_gap, group_height in groups:
             for line in lines:
                 position = (x + width / 2, top + padding)
@@ -471,22 +474,33 @@ def create_json_only(ffmpeg, mp3, args, config, wav_options=()):
 
 
 def render_track_frames(background, cues, duration, config, rect, font_path, work):
-    """한 곡의 배경과 가사 프레임을 한 번 만들고 각 프레임의 표시 길이를 돌려줘요."""
+    """노래 중인 가사와 발화 전 대기 가사를 정확한 시간에 보여줘요."""
     if not cues:
         blank = work / "blank.png"
         background.save(blank)
         return [(blank, duration)]
     starts = [Decimal(str(cue["start"])) for cue in cues]
+    minimum_gap = Decimal(str(config["waiting_min_gap_seconds"]))
     timeline = []
+
+    def append_waiting(index, length):
+        path = work / f"waiting_{index}.png"
+        lyric_frame(background, cues, index, config, font_path, rect, waiting=True).save(path)
+        timeline.append((path, length))
+
     if starts[0] > 0:
-        blank = work / "blank.png"
-        background.save(blank)
-        timeline.append((blank, starts[0]))
-    for index, (start, end) in enumerate(zip(starts, starts[1:] + [duration])):
+        append_waiting(0, starts[0])
+    for index, (start, next_start) in enumerate(zip(starts, starts[1:] + [duration])):
         path = work / f"cue_{index}.png"
         lyric_frame(background, cues, index, config, font_path, rect).save(path)
-        # 발화가 끝나도 유지하고 다음 가사의 발화 시작 시각에 교체해요.
-        timeline.append((path, end - start))
+        end = Decimal(str(cues[index]["end"]))
+        gap = next_start - end
+        if index + 1 < len(cues) and gap > 0 and gap >= minimum_gap:
+            timeline.append((path, end - start))
+            append_waiting(index + 1, gap)
+        else:
+            # 짧은 호흡과 마지막 가사 뒤에는 현재 화면을 유지해요.
+            timeline.append((path, next_start - start))
     return timeline
 
 

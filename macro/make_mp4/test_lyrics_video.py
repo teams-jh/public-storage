@@ -17,6 +17,113 @@ import lyrics_video as video
 
 
 class LyricsTests(unittest.TestCase):
+    def test_waiting_lyrics_are_dimmed_and_keep_upcoming_positions(self):
+        from PIL import ImageDraw
+
+        background = Image.new("RGB", (1200, 600), "black")
+        cues = [dict(en=f"Line {letter}", ko=f"가사 {letter}") for letter in ("A", "B", "C")]
+        cues[0] = dict(en="Previous line\nAnother long line", ko="이전 가사\n두 번째 줄")
+        original = ImageDraw.ImageDraw.text
+        for profile in ("k_pop", "eng_pop"):
+            for radius in (0, 1):
+                with self.subTest(profile=profile, radius=radius):
+                    config = dict(video.settings(profile), context_radius=radius)
+                    font = video.find_font(config, None)
+                    calls = []
+
+                    def track(drawer, position, text, **options):
+                        calls.append((text, position, options["font"].size, options["fill"][-1]))
+                        return original(drawer, position, text, **options)
+
+                    with patch.object(ImageDraw.ImageDraw, "text", new=track):
+                        video.lyric_frame(background, cues, 1, config, font, config["rect"])
+                        active = {text: (position, size, alpha) for text, position, size, alpha in calls}
+                        calls.clear()
+                        video.lyric_frame(background, cues, 1, config, font, config["rect"], waiting=True)
+                    self.assertEqual({text for text, _, _, _ in calls},
+                                     {text for cue in cues[1:2 + radius] for text in cue.values()})
+                    for text, position, size, alpha in calls:
+                        self.assertEqual((position, size), active[text][:2])
+                        self.assertEqual(alpha, round(255 * config["context_opacity"]))
+                    self.assertEqual(active["Line B"][-1], 255)
+
+    def test_waiting_timeline_preserves_intro_gap_and_song_duration(self):
+        background = Image.new("RGB", (640, 360), "black")
+        cues = [dict(start=10, end=12, en="First", ko="첫 가사"),
+                dict(start=20, end=22, en="Second", ko="두 번째 가사"),
+                dict(start=22.5, end=24, en="Third", ko="세 번째 가사")]
+        for threshold in (2, 8, 9):
+            with self.subTest(threshold=threshold), tempfile.TemporaryDirectory() as directory:
+                config = dict(video.settings("eng_pop"), waiting_min_gap_seconds=threshold)
+                with patch.object(video, "lyric_frame", return_value=background) as render:
+                    timeline = video.render_track_frames(background, cues, Decimal(30), config,
+                                                         config["rect"], None, Path(directory))
+                self.assertEqual(sum(length for _, length in timeline), Decimal(30))
+                self.assertTrue(all(length > 0 and path.is_file() for path, length in timeline))
+                actual = [(path.name, length) for path, length in timeline]
+                expected = [("waiting_0.png", Decimal(10))]
+                expected += ([("cue_0.png", Decimal(2)), ("waiting_1.png", Decimal(8))]
+                             if threshold <= 8 else [("cue_0.png", Decimal(10))])
+                expected += [("cue_1.png", Decimal("2.5")), ("cue_2.png", Decimal("7.5"))]
+                self.assertEqual(actual, expected)
+                waiting_indices = [call.args[2] for call in render.call_args_list if call.kwargs.get("waiting")]
+                self.assertEqual(waiting_indices, [0, 1] if threshold <= 8 else [0])
+
+    def test_waiting_handles_instrumentals_and_contiguous_cues(self):
+        background = Image.new("RGB", (640, 360), "black")
+        config = dict(video.settings(), waiting_min_gap_seconds=0)
+        for cues in ([], [dict(start=0, end=1, en="First", ko="첫 가사"),
+                          dict(start=1, end=2, en="Second", ko="다음 가사")]):
+            with self.subTest(cues=cues), tempfile.TemporaryDirectory() as directory:
+                with patch.object(video, "lyric_frame", return_value=background) as render:
+                    timeline = video.render_track_frames(background, cues, Decimal(3), config,
+                                                         config["rect"], None, Path(directory))
+                self.assertEqual(sum(length for _, length in timeline), Decimal(3))
+                self.assertTrue(all(length > 0 for _, length in timeline))
+                self.assertFalse(any(call.kwargs.get("waiting") for call in render.call_args_list))
+                if not cues:
+                    render.assert_not_called()
+                    self.assertIsNone(ImageChops.difference(background, Image.open(timeline[0][0])).getbbox())
+
+    def test_waiting_mp4_changes_at_vocal_boundaries(self):
+        import imageio_ffmpeg
+
+        config = video.settings("eng_pop")
+        font = video.find_font(config, None)
+        background = Image.new("RGB", (640, 360), "#492000")
+        cues = [dict(start=0.5, end=1, en="First lyric", ko="첫 가사"),
+                dict(start=3, end=3.5, en="Following lyric", ko="다음 가사")]
+        frames = {(index, waiting): video.lyric_frame(background, cues, index, config, font,
+                                                      config["rect"], waiting=waiting)
+                  for index in (0, 1) for waiting in (False, True)}
+        fps = int(video.global_number("MAKE_K_POP_VIDEO_FPS"))
+        samples = {round(seconds * fps): key for seconds, key in
+                   [(0.2, (0, True)), (0.46, (0, True)), (0.54, (0, False)),
+                    (0.96, (0, False)), (1.04, (1, True)), (2.96, (1, True)),
+                    (3.04, (1, False)), (3.8, (1, False))]}
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            timeline = video.render_track_frames(background, cues, Decimal(4), config,
+                                                 config["rect"], font, work)
+            output = work / "waiting.mp4"
+            video.encode_timeline(video.find_ffmpeg(), timeline,
+                                  ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"],
+                                  Decimal(4), config, work, output)
+            decoded = imageio_ffmpeg.read_frames(str(output), pix_fmt="rgb24")
+            next(decoded)
+            checked = []
+            for number, raw in enumerate(decoded):
+                if number not in samples:
+                    continue
+                key = samples[number]
+                actual = Image.frombytes("RGB", background.size, raw)
+                def distance(expected):
+                    return sum(ImageStat.Stat(ImageChops.difference(actual, expected)).mean)
+                with self.subTest(frame=number):
+                    self.assertLess(distance(frames[key]), distance(frames[(key[0], not key[1])]))
+                checked.append(number)
+            self.assertEqual(set(checked), set(samples))
+
     def test_long_middle_line_does_not_shrink_other_cues_or_languages(self):
         from PIL import ImageDraw
 
@@ -560,14 +667,14 @@ class LyricsTests(unittest.TestCase):
                                      capture_output=True, check=True).stdout
                 return Image.frombytes("RGB", (640, 360), raw)
 
-            blank = frame_at(0.2)
+            waiting = frame_at(0.2)
             for seconds, visible in [(0.46, False), (0.54, True), (1.04, True),
                                      (0.7, True), (1.2, True), (1.7, True), (2.5, True),
                                      (3.2, True), (3.7, True), (4.2, True), (4.7, True), (5.5, True),
                                      (6.2, False), (6.7, True), (7.2, True), (7.7, True), (8.8, True)]:
                 with self.subTest(seconds=seconds):
                     frame = frame_at(seconds)
-                    difference = ImageChops.difference(blank, frame)
+                    difference = ImageChops.difference(waiting, frame)
                     right = sum(ImageStat.Stat(difference.crop((340, 0, 640, 360))).mean)
                     left = sum(ImageStat.Stat(difference.crop((0, 0, 330, 360))).mean)
                     self.assertLess(left, 1)
