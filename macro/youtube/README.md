@@ -75,3 +75,21 @@ python youtube2mp3.py -q 320
 
 변환이 완료된 MP3 파일은 아래 폴더에 저장됩니다:
 `macro/youtube/downloads/`
+
+
+### MP4 다운로드 옵션
+
+옵션을 생략하면 기존처럼 MP3만 다운로드해요.
+
+```bash
+# MP4와 MP3 모두 다운로드
+python download_mp3.py --option mp4
+
+# MP4만 다운로드
+python download_mp3.py --option mp4_only
+
+# URL, 파일, 저장 경로 옵션과 함께 사용할 수 있어요.
+python download_mp3.py --option mp4_only "https://www.youtube.com/watch?v=..."
+```
+
+MP4 다운로드 기록은 MP3 기록과 따로 저장해요. `link.txt`에서 이미 완료 표시된 링크를 다른 형식으로 받으려면 URL을 직접 전달하거나 완료 표시를 지워주세요.

@@ -144,8 +144,13 @@ def load_lyrics(path, mp3, duration, args, config):
             raise ValueError("가사 JSON은 cues 목록이 있는 객체 또는 목록이어야 해요.")
         if data.get("source_sha256", digest) != digest:
             raise ValueError(f"음원이 바뀌었어요. {path.name}을 다른 이름으로 보관하고 다시 실행해 주세요.")
+        if data.get("cues") == []:
+            print(f"가사 목록이 비어 있어 배경과 음원만 이어 붙여요: {path.resolve()}", flush=True)
+            return []
         if data.get("source_language", source_language) != source_language:
             raise ValueError(f"가사 원문 언어가 달라요. {path.name}의 source_language를 확인해 주세요.")
+        if data.get("instrumental") is True:
+            raise ValueError("연주곡은 cues를 빈 목록으로 저장해 주세요.")
     else:
         if args.offline:
             raise ValueError(f"{path.name}이 없어요. --offline을 빼거나 한영 가사 JSON을 만들어 주세요.")
@@ -413,6 +418,10 @@ def create_json_only(ffmpeg, mp3, args, config, wav_options=()):
 
 def render_track_frames(background, cues, duration, config, rect, font_path, work):
     """한 곡의 배경과 가사 프레임을 한 번 만들고 각 프레임의 표시 길이를 돌려줘요."""
+    if not cues:
+        blank = work / "blank.png"
+        background.save(blank)
+        return [(blank, duration)]
     starts = [Decimal(str(cue["start"])) for cue in cues]
     timeline = []
     if starts[0] > 0:

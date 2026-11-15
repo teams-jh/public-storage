@@ -1,6 +1,7 @@
 """하위 폴더마다 가사 JSON을 준비하고 여러 곡을 순서대로 이어 붙여요."""
 
 import argparse
+from contextlib import contextmanager
 from decimal import Decimal
 from itertools import chain, repeat
 import json
@@ -45,6 +46,19 @@ def print_merge_plan(output, songs, count):
     print(f"{output.name} / {' → '.join(mp3.stem for mp3 in songs)} / 전체 {count}회", flush=True)
 
 
+@contextmanager
+def track_log(mp3, image):
+    """두 합치기 스크립트에서 작업 중인 파일과 오류 원인을 함께 보여줘요."""
+    paths = (f"음원: {mp3.resolve()}\n"
+             f"가사 JSON: {mp3.with_suffix('.lyrics.json').resolve()}\n"
+             f"배경 이미지: {image.resolve()}")
+    print(f"곡을 준비해요.\n{paths}", flush=True)
+    try:
+        yield
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(f"곡을 처리하지 못했어요.\n{paths}\n원인: {exc}") from exc
+
+
 def normalize_track(ffmpeg, source, output, target_loudness, max_true_peak):
     """곡 전체를 측정한 뒤 한 가지 게인을 적용해 곡 안의 음량 차이를 유지해요."""
     command = [ffmpeg, "-nostdin", "-hide_banner", "-i", str(source)]
@@ -87,21 +101,22 @@ def merge_folder(ffmpeg, tracks, output, args, config, wav_options, *, sample_ra
         duration = Decimal(0)
         canvas = None
         for index, (mp3, image) in enumerate(tracks):
-            track = work / str(index)
-            track.mkdir()
-            wav = track / "audio.wav"
-            track_duration = decode_wav(ffmpeg, mp3, source_wav, wav_options)
-            normalize_track(ffmpeg, source_wav, wav, target_loudness, max_true_peak)
-            cues = load_lyrics(mp3.with_suffix(".lyrics.json"), mp3, float(track_duration), args, config)
-            with Image.open(image) as opened:
-                background = ImageOps.exif_transpose(opened).convert("RGB")
-            if canvas is None:
-                canvas = background.size
-            if background.size != canvas:
-                background = ImageOps.pad(background, canvas, color="black")
-            timeline.extend(render_track_frames(background, cues, track_duration, config, args.rect, font_path, track))
-            audio_entries.append(f"file '{wav.relative_to(work).as_posix()}'\n")
-            duration += track_duration
+            with track_log(mp3, image):
+                track = work / str(index)
+                track.mkdir()
+                wav = track / "audio.wav"
+                track_duration = decode_wav(ffmpeg, mp3, source_wav, wav_options)
+                cues = load_lyrics(mp3.with_suffix(".lyrics.json"), mp3, float(track_duration), args, config)
+                normalize_track(ffmpeg, source_wav, wav, target_loudness, max_true_peak)
+                with Image.open(image) as opened:
+                    background = ImageOps.exif_transpose(opened).convert("RGB")
+                if canvas is None:
+                    canvas = background.size
+                if background.size != canvas:
+                    background = ImageOps.pad(background, canvas, color="black")
+                timeline.extend(render_track_frames(background, cues, track_duration, config, args.rect, font_path, track))
+                audio_entries.append(f"file '{wav.relative_to(work).as_posix()}'\n")
+                duration += track_duration
 
         if count is None:
             count = automatic_repeat_count(duration, sample_rate)
@@ -214,7 +229,8 @@ def main(profile="k_pop"):
                     create_json_only(ffmpeg, mp3, args, config, wav_options)
                 except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
                     failed = True
-                    print(f"{folder.name}/{mp3.name}의 가사 JSON을 만들지 못했어요.\n{exc}", file=sys.stderr)
+                    print(f"가사 JSON을 만들지 못했어요.\n음원: {mp3.resolve()}\n"
+                          f"가사 JSON: {mp3.with_suffix('.lyrics.json').resolve()}\n원인: {exc}", file=sys.stderr)
             continue
 
         try:
@@ -243,7 +259,7 @@ def main(profile="k_pop"):
                 print(f"영상을 만들었어요. {output}", flush=True)
         except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
             failed = True
-            print(f"{folder.name} 영상을 만들지 못했어요.\n{exc}", file=sys.stderr)
+            print(f"{folder.name} 영상을 만들지 못했어요.\n입력 폴더: {folder.resolve()}\n{exc}", file=sys.stderr)
 
     if not found:
         print(f"하위 폴더에 MP3가 없어요. {args.folder}")
