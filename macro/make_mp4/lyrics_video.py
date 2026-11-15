@@ -278,6 +278,42 @@ def lyric_window(cues, current_index, radius):
             for index in range(max(0, current_index - radius), min(len(cues), current_index + radius + 1))]
 
 
+def wrap_lyric_line(text, font, width):
+    """단어를 보존하고, 들어가는 괄호 구절은 묶어서 균형 있게 줄을 나눠요."""
+    measure = lru_cache(maxsize=None)(font.getlength)
+    tokens = []
+    for phrase in re.findall(r"\([^()]*\)\S*|\S+", text):
+        words = [phrase] if measure(phrase) <= width else phrase.split()
+        for word in words:
+            if measure(word) <= width:
+                tokens.append(word)
+                continue
+            # 공백 없는 긴 단어도 화면 밖으로 나가지 않게 글자 경계에서 나눠요.
+            piece = ""
+            for character in word:
+                if piece and measure(piece + character) > width:
+                    tokens.append(piece)
+                    piece = ""
+                piece += character
+            tokens.append(piece)
+
+    # 줄 수를 먼저 최소화하고, 같은 줄 수에서는 짧은 마지막 줄을 피하도록 균형을 맞춰요.
+    best = [(0, 0, [])] * (len(tokens) + 1)
+    for start in range(len(tokens) - 1, -1, -1):
+        candidates = []
+        for end in range(start + 1, len(tokens) + 1):
+            line = " ".join(tokens[start:end])
+            length = measure(line)
+            if length > width:
+                break
+            count, cost, remaining = best[end]
+            candidates.append((count + 1, cost + (width - length) ** 2, [line, *remaining]))
+        if not candidates:
+            raise ValueError("영어 한 글자가 가사 영역보다 넓어요. --rect를 넓혀 주세요.")
+        best[start] = min(candidates, key=lambda candidate: candidate[:2])
+    return best[0][-1] or [""]
+
+
 def lyric_frame(background, cues, current_index, config, font_path, rect):
     from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageStat
 
@@ -292,12 +328,16 @@ def lyric_frame(background, cues, current_index, config, font_path, rect):
     available_height = slot_height * (1 - config["context_slot_gap_ratio"])
     maximum = max(1, round(image.height * config["font_ratio"]))
     minimum = max(1, round(image.height * config["min_font_ratio"]))
-    def line_layout(text, font_size, color):
+    wrap_languages = config.get("auto_wrap_languages", [])
+    def line_layout(text, font_size, color, language=None):
         font = ImageFont.truetype(font_path, font_size)
         stroke = max(1, round(font_size * config["stroke_ratio"])) * config["stroke_multiplier"]
         bold = max(0, round(font_size * config["bold_ratio"]))
         padding = bold + stroke
         lines = [" ".join(line.split()) for line in text.splitlines() if line.strip()] or [""]
+        if language in wrap_languages:
+            lines = [wrapped for line in lines
+                     for wrapped in wrap_lyric_line(line, font, width - padding * 2)]
         ascent, descent = font.getmetrics()
         line_height = ascent + descent + padding * 2
         line_gap = font_size * config["line_gap_ratio"]
@@ -318,13 +358,16 @@ def lyric_frame(background, cues, current_index, config, font_path, rect):
     else:
         raise ValueError("가사 영역의 높이가 부족해요. --rect를 넓혀 주세요.")
 
+    minimum_sizes = [max(min(minimum, size), round(size * config["auto_wrap_min_font_scale"]))
+                     if language in wrap_languages else min(minimum, size)
+                     for language, size, _ in styles]
     layouts = []
     for offset, cue in window:
         groups = []
-        for language, normal_size, color in styles:
+        for (language, normal_size, color), minimum_size in zip(styles, minimum_sizes):
             # 각 가사·언어의 너비를 따로 맞춰 주변 가사와 다른 언어의 크기를 유지해요.
-            for font_size in range(normal_size, min(minimum, normal_size) - 1, -1):
-                group = line_layout(cue[language], font_size, color)
+            for font_size in range(normal_size, minimum_size - 1, -1):
+                group = line_layout(cue[language], font_size, color, language)
                 lines, font, _, _, padding, _, _, _ = group
                 if max(font.getlength(line) for line in lines) + padding * 2 <= width:
                     break
@@ -339,19 +382,30 @@ def lyric_frame(background, cues, current_index, config, font_path, rect):
     slot_sizes = [slot_height] * (radius * 2 + 1)
     slot_gap = slot_height - available_height
     if any(total > available_height for _, _, total, _ in layouts):
+        if wrap_languages:
+            slot_sizes = [slot_gap] * len(slot_sizes)
         for offset, _, total, _ in layouts:
             slot_sizes[offset + radius] = total + slot_gap
         while sum(slot_sizes) > height:
             candidates = [(row, language) for row, (_, groups, total, _) in enumerate(layouts)
                           if total > available_height
                           for language, group in enumerate(groups)
-                          if group[1].size > min(minimum, styles[language][1])]
+                          if group[1].size > minimum_sizes[language]
+                          and (not wrap_languages or len(group[0]) > 1)]
             if not candidates:
+                if wrap_languages and any(offset != 0 for offset, _, _, _ in layouts):
+                    # 현재 가사는 읽을 수 있는 크기로 남기고 먼 주변 가사부터 생략해요.
+                    row = max((row for row, (offset, _, _, _) in enumerate(layouts) if offset != 0),
+                              key=lambda row: abs(layouts[row][0]))
+                    offset, _, _, _ = layouts.pop(row)
+                    slot_sizes[offset + radius] = slot_gap
+                    continue
                 raise ValueError("가사 영역의 높이가 부족해요. JSON에서 구간을 나누거나 --rect를 넓혀 주세요.")
             row, language = max(candidates, key=lambda item: layouts[item[0]][1][item[1]][-1])
             offset, groups, _, gap = layouts[row]
             group = groups[language]
-            groups[language] = line_layout(window[row][1][styles[language][0]], group[1].size - 1, group[2])
+            groups[language] = line_layout(cues[current_index + offset][styles[language][0]],
+                                          group[1].size - 1, group[2], styles[language][0])
             total = sum(group[-1] for group in groups) + gap
             layouts[row] = (offset, groups, total, gap)
             slot_sizes[offset + radius] = total + slot_gap

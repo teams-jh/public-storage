@@ -304,6 +304,8 @@ export const MAKE_K_POP_LYRICS_CONFIG = {
  * source_language/target_language는 영어 인식·한글 번역 방향, source_label/target_label은 안내 언어 이름이에요.
  * translation_model은 로컬 영어→한국어 번역 모델 ID예요. 바꾸면 번역 품질·다운로드 용량이 달라져요.
  * translation_family는 번역 모델 종류(marian/nllb), translation_source_tag/translation_target_tag는 NLLB 원문/번역 언어 태그예요. 바꾸면 불러올 모델 구조와 번역 언어가 달라져요.
+ * auto_wrap_languages는 자동 줄바꿈할 언어 코드 목록이에요. en을 빼면 영어도 한 줄에 맞춰 축소하며 원문과 시간 정보는 바꾸지 않아요.
+ * auto_wrap_min_font_scale은 자동 줄바꿈 언어의 기본 글자 크기 대비 최소 비율(0~1)이에요. 0.8이면 기본 크기의 80% 아래로 줄이지 않아요. 높이면 읽기 쉬워지지만 공간이 부족할 때 주변 가사가 더 자주 생략돼요.
  * 나머지 글자 크기 비율·색상·투명도·무음 길이·반복 기준은 공통 설정과 같은 단위와 효과를 가져요.
  * Python에서 JSON으로 읽으므로 큰따옴표와 JSON 문법을 유지해요.
  */
@@ -316,6 +318,8 @@ export const MAKE_ENG_POP_LYRICS_CONFIG = {
   "target_language": "ko",
   "source_label": "영어",
   "target_label": "한글",
+  "auto_wrap_languages": ["en"],
+  "auto_wrap_min_font_scale": 0.8,
   "translation_model": "facebook/nllb-200-distilled-600M",
   "translation_family": "nllb",
   "translation_source_tag": "eng_Latn",

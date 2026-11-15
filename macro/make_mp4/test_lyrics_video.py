@@ -38,6 +38,8 @@ class LyricsTests(unittest.TestCase):
 
             normal = sizes_for(cues)
             for language in ("ko", "en"):
+                if language in config.get("auto_wrap_languages", []):
+                    continue  # 자동 줄바꿈 언어는 별도 가독성 테스트에서 검증해요.
                 with self.subTest(profile=profile, long_language=language):
                     changed = [dict(cue) for cue in cues]
                     changed[1][language] = ("아주 긴 가사 " if language == "ko" else "A very long lyric ") * 20
@@ -47,6 +49,99 @@ class LyricsTests(unittest.TestCase):
                     for text, size in normal.items():
                         if text != cues[1][language]:
                             self.assertEqual(actual[text], size)
+
+    def test_english_wrap_preserves_words_and_font_size(self):
+        from PIL import ImageDraw
+
+        config = video.settings("eng_pop")
+        font = video.find_font(config, None)
+        background = Image.new("RGB", (1920, 1080), "#492000")
+        cue = dict(en="Where everybody knows your name (where everybody now knows your name)",
+                   ko="모두가 그대 이름을 아는 곳, 이제 모두가 알아주는 곳")
+        cues = [dict(en="Previous line", ko="이전 가사"), cue,
+                dict(en="Following line", ko="다음 가사")]
+        calls = []
+        original = ImageDraw.ImageDraw.text
+
+        def track(drawer, position, text, **options):
+            calls.append((text, options["font"].size,
+                          drawer.textbbox(position, text, font=options["font"],
+                                          anchor=options["anchor"], stroke_width=options["stroke_width"])))
+            return original(drawer, position, text, **options)
+
+        with patch.object(ImageDraw.ImageDraw, "text", new=track):
+            video.lyric_frame(background, cues, 1, config, font, config["rect"])
+        rendered = calls[::2]  # 외곽선과 본문 중 한 번만 검사해요.
+        english = [(text, size) for text, size, _ in rendered
+                   if text not in {cue["ko"] for cue in cues}
+                   and text not in {"Previous line", "Following line"}]
+        self.assertGreater(len(english), 1)
+        self.assertEqual(" ".join(text for text, _ in english), cue["en"])
+        self.assertTrue(all(size == round(background.height * config["font_ratio"])
+                            for _, size in english))
+        self.assertIn("Previous line", [text for text, _, _ in rendered])
+        self.assertIn("Following line", [text for text, _, _ in rendered])
+        x, y, width, height = [value * dimension for value, dimension in
+                              zip(config["rect"], (*background.size, *background.size))]
+        for _, _, (left, top, right, bottom) in rendered:
+            self.assertGreaterEqual(left, x)
+            self.assertLessEqual(right, x + width)
+            self.assertGreaterEqual(top, y)
+            self.assertLessEqual(bottom, y + height)
+
+    def test_crowded_english_keeps_readable_size_and_all_current_words(self):
+        from PIL import ImageDraw
+
+        config = video.settings("eng_pop")
+        font = video.find_font(config, None)
+        background = Image.new("RGB", (1200, 600), "black")
+        cue = dict(en="A very long lyric " * 20, ko="현재 가사")
+        cues = [dict(en="Previous line", ko="이전 가사"), cue,
+                dict(en="Following line", ko="다음 가사")]
+        original_cues = [dict(row) for row in cues]
+        calls = []
+        original = ImageDraw.ImageDraw.text
+
+        def track(drawer, position, text, **options):
+            calls.append((text, options["font"].size))
+            return original(drawer, position, text, **options)
+
+        with patch.object(ImageDraw.ImageDraw, "text", new=track):
+            video.lyric_frame(background, cues, 1, config, font, config["rect"])
+        english = [(text, size) for text, size in calls[::2]
+                   if text.startswith(("A", "very", "long", "lyric"))]
+        self.assertEqual(" ".join(text for text, _ in english), " ".join(cue["en"].split()))
+        floor = round(round(background.height * config["font_ratio"]) * config["auto_wrap_min_font_scale"])
+        self.assertTrue(all(size >= floor for _, size in english))
+        self.assertIn((cue["ko"], round(round(background.height * config["font_ratio"])
+                                      * config["translation_font_scale"])), calls)
+        self.assertNotIn("Previous line", [text for text, _ in calls])
+        self.assertEqual(cues, original_cues)
+
+    def test_english_too_large_to_read_reports_how_to_fix_it(self):
+        config = video.settings("eng_pop")
+        font = video.find_font(config, None)
+        with self.assertRaisesRegex(ValueError, "JSON.*--rect"):
+            video.lyric_frame(Image.new("RGB", (1200, 600)),
+                              [dict(en="A very long lyric " * 200, ko="가사")],
+                              0, config, font, config["rect"])
+
+    def test_english_wrap_keeps_fitting_parentheses_together_and_handles_long_words(self):
+        from PIL import ImageFont
+
+        config = video.settings("eng_pop")
+        font = ImageFont.truetype(video.find_font(config, None), 28)
+        phrase = "(where everybody now knows your name)"
+        width = font.getlength(phrase)
+        self.assertEqual(video.wrap_lyric_line("Where everybody knows your name " + phrase, font, width),
+                         ["Where everybody knows your name", phrase])
+        for text in ("Hello world", "Where everybody knows your name",
+                     "(Hello), world! (Goodbye).", "W" * 70):
+            lines = video.wrap_lyric_line(text, font, 180)
+            self.assertEqual("".join("".join(lines).split()), "".join(text.split()))
+            if " " in text:
+                self.assertEqual(" ".join(lines), text)
+            self.assertTrue(all(font.getlength(line) <= 180 for line in lines))
 
     def test_option_three_skips_existing_json_even_with_force(self):
         with tempfile.TemporaryDirectory() as directory:
