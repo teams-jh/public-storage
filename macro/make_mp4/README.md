@@ -6,6 +6,10 @@
 - `make_k_pop.py`: `k_pop` 폴더의 MP3·이미지로 한영 가사 영상과 1시간 반복 영상을 만들어요. 결과는 `result/k_pop`에 저장해요.
 - `make_eng_pop.py`: `eng_pop` 폴더의 MP3·이미지로 영어 가사 아래에 더 작은 한글 번역을 넣어요. 결과는 `result/eng_pop`에 저장해요.
 
+`make_k_pop.py`와 `make_eng_pop.py`로 새로 만드는 영상은 합치기 영상과 같은 방식으로 곡 전체의 음량을 측정해 맞춰요. 곡 안의 강약은 유지하고, 목표 음량은 -16 LUFS, 오디오 인코딩 전 피크 상한은 -2 dBTP예요. 피크가 큰 곡은 목표 음량보다 작게 들릴 수 있어요. 두 값은 `src/constants/global_constants.ts`의 `MAKE_POP_MERGE_TARGET_LOUDNESS_LUFS`, `MAKE_POP_MERGE_MAX_TRUE_PEAK_DBTP`에서 함께 조절해요. 반복 영상도 보정한 한 곡 영상을 사용해요.
+
+기존 영상까지 음량을 맞추려면 `python .\make_k_pop.py --force` 또는 `python .\make_eng_pop.py --force`로 한 곡과 반복 영상을 다시 만들어 주세요. 옵션 2만 실행할 때 이미 한 곡 영상이 있으면 그 영상의 음량을 그대로 사용해요. 가사 JSON만 준비할 때는 음량을 보정하지 않아요.
+
 ## 여러 곡을 이어 붙이고 반복하기
 
 `k_pop_merge` 또는 `eng_pop_merge` 아래에 묶음마다 하위 폴더를 만들고, 곡별로 이름이 같은 MP3와 PNG 또는 JPG를 넣어요. 각 하위 폴더에서 파일명 순서대로 곡을 이어 붙여요. 예를 들어 솔지 → 장혜리 → 최유리 순서라면, 이 세 곡 순서를 한 묶음으로 반복해요. 곡이 바뀌면 해당 이미지와 가사가 표시돼요.
@@ -26,6 +30,19 @@ python .\make_eng_pop_merge.py --merge   # 영어 원문과 한글 번역으로 
 횟수 없이 `--merge`를 쓰면 하위 폴더마다 1시간 이상을 채우는 최소 횟수만큼 곡 묶음을 반복해요. 한 묶음이 20분이면 3회, 1시간 이상이면 1회 재생해요. 최소 재생 시간은 `MAKE_POP_MERGE_MIN_DURATION_SECONDS`에서 조절해요.
 
 하위 폴더별 결과는 `result/k_pop_merge/폴더이름.mp4` 또는 `result/eng_pop_merge/폴더이름.mp4`에 저장해요. 같은 폴더의 영상을 다시 만들면 새 영상이 완성된 뒤 기존 파일을 교체해요.
+
+## 한국어·영어·일본어 곡을 한 영상으로 만들기
+
+`total_merge` 폴더에 곡별로 이름이 같은 MP3, PNG 또는 JPG, `.lyrics.json`을 넣어요. 파일명 순서대로 이어 붙여 `result/total_merge/total_merge.mp4`에 저장해요. 한국어 곡은 한국어·영어, 영어 곡은 영어·한국어, 일본어 곡은 일본어·한국어 순서로 가사를 표시해요. 가사 JSON의 `source_language`로 원문 언어를 고르고, 일본어 원문은 `ja`에서 읽어요. `source_language`가 없으면 한국어 원문으로 처리해요.
+
+```powershell
+python .\make_total_merge.py --merge --dry-run  # 곡 순서와 반복 횟수를 확인해요
+python .\make_total_merge.py --merge             # 곡 묶음을 1시간 이상 반복해요
+python .\make_total_merge.py --merge 1           # 곡 묶음을 한 번 이어 붙여요
+python .\make_total_merge.py --timestamp        # 첫 재생의 곡별 시작 시각을 저장해요
+```
+
+가사 JSON이 없는 곡은 `--source-language ko`, `--source-language en`, `--source-language ja` 중 하나를 골라 실행해요. 이 옵션은 한 번 실행할 때 새로 만드는 가사 JSON에 적용돼요. 같은 언어의 곡만 모아 `--folder`로 지정할 수 있어요. 일본어 곡은 기본 설정에서 일본어 원문용 폰트와 한글 번역용 폰트를 각각 사용해요. `--font`로 직접 지정하면 한글과 일본어를 모두 지원하는 폰트를 사용해 주세요.
 
 ## 영어 음악 만들기
 
@@ -125,7 +142,7 @@ JSON을 수정하고 다시 실행하면 수정한 가사를 사용해요. `star
 }
 ```
 
-한영 가사가 모두 있는 JSON에 `--offline`을 사용하면 모델 다운로드·인식·외부 번역 없이 만들어요. 자동 생성 JSON에는 원본 음원 SHA-256이 있어 음원을 교체하면 알려줘요. 새로 인식하려면 기존 JSON을 다른 이름으로 보관해 주세요. `--force`는 MP4만 다시 만들고 가사 JSON은 유지해요.
+한영 가사가 모두 있는 JSON에 `--offline`을 사용하면 모델 다운로드·인식·외부 번역 없이 만들어요. `source_language`는 실제 음원의 원문 언어예요. 스페인어 곡이라면 `es`를 유지하고 `en`·`ko`에 번역을 넣어요. 설정과 원문 언어가 달라도 두 언어가 모두 채워져 있으면 저장된 가사를 그대로 표시해요. 이 경우 빈 번역은 자동으로 채우지 않으므로 JSON에서 먼저 보완해 주세요. 자동 생성 JSON에는 원본 음원 SHA-256이 있어 음원을 교체하면 알려줘요. 새로 인식하려면 기존 JSON을 다른 이름으로 보관해 주세요. `--force`는 MP4만 다시 만들고 가사 JSON은 유지해요.
 
 ```powershell
 python macro/make_mp4/make_k_pop.py --single-pass --offline --force

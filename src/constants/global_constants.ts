@@ -186,13 +186,13 @@ export const MAKE_POP_MERGE_AUDIO_SAMPLE_RATE_HZ = 48000;
 export const MAKE_POP_MERGE_AUDIO_CHANNELS = 2;
 
 /**
- * 합치기 영상에서 곡마다 맞출 평균 체감 음량(LUFS).
+ * 개별·합치기 가사 영상에서 곡마다 맞출 평균 체감 음량(LUFS).
  * 값을 높이면 곡이 더 크게 들려요. 가장 큰 소리가 제한을 넘으면 증폭을 줄여요.
  */
 export const MAKE_POP_MERGE_TARGET_LOUDNESS_LUFS = -16;
 
 /**
- * 합치기 영상의 오디오 변환 전 실제 최대 피크 상한(dBTP).
+ * 개별·합치기 가사 영상의 오디오 변환 전 실제 최대 피크 상한(dBTP).
  * 값을 낮추면 소리가 잘리는 것을 막을 여유가 늘고, 피크가 큰 곡은 목표 음량보다 작게 들릴 수 있어요.
  */
 export const MAKE_POP_MERGE_MAX_TRUE_PEAK_DBTP = -2;
@@ -235,7 +235,6 @@ export const MAKE_POP_MERGE_SECONDS_PER_MINUTE = 60;
  * translation_font_scale: 원문 글자 크기 대비 번역 글자 크기 비율(0~1). 줄이면 아래쪽 번역이 더 작게 보여요.
  * context_radius: 현재 가사 앞뒤에 표시할 가사 개수(각 방향 기준 개). 1이면 이전·현재·다음 최대 3개를 표시해요.
  * context_opacity: 이전·다음 가사와 발화 전 대기 가사의 불투명도(0~1). 낮추면 흐려지고 노래 중인 현재 가사는 불투명하게 표시해요.
- * waiting_min_gap_seconds: 곡 중간에 다음 가사 대기 화면으로 전환할 최소 간주 길이(초, 0 이상). 낮추면 짧은 쉼에도 전환해요. 첫 가사 전에는 길이와 관계없이 대기 가사를 보여주고, 마지막 가사 뒤에는 마지막 화면을 유지해요.
  * context_slot_gap_ratio: 각 가사 영역 높이 대비 비워 둘 간격 비율(0~1). 늘리면 가사 묶음 사이 간격이 넓어져요.
  * line_gap_ratio/language_gap_ratio: 글자 크기 대비 줄/언어 사이 간격 비율. 늘리면 더 넓게 배치해요.
  * ko_color/en_color/stroke_color: RGB 색상 문자열 또는 "auto". 가사는 줄 뒤 배경에 맞춰 색을 고르고, 외곽선은 글자와 반대 밝기로 표시해요. RGB 값을 넣으면 색을 고정해요.
@@ -272,7 +271,6 @@ export const MAKE_K_POP_LYRICS_CONFIG = {
   "translation_font_scale": 0.85,
   "context_radius": 1,
   "context_opacity": 0.25,
-  "waiting_min_gap_seconds": 2,
   "context_slot_gap_ratio": 0.1,
   "line_gap_ratio": 0.3,
   "language_gap_ratio": 0.8,
@@ -306,6 +304,8 @@ export const MAKE_K_POP_LYRICS_CONFIG = {
  * source_language/target_language는 영어 인식·한글 번역 방향, source_label/target_label은 안내 언어 이름이에요.
  * translation_model은 로컬 영어→한국어 번역 모델 ID예요. 바꾸면 번역 품질·다운로드 용량이 달라져요.
  * translation_family는 번역 모델 종류(marian/nllb), translation_source_tag/translation_target_tag는 NLLB 원문/번역 언어 태그예요. 바꾸면 불러올 모델 구조와 번역 언어가 달라져요.
+ * context_slot_gap_ratio는 가사 한 칸 높이 대비 묶음 사이에 비워 둘 여백 비율(0~1)이에요. 높이면 이전·현재·다음 가사가 더 뚜렷하게 떨어져 보여요.
+ * language_gap_ratio는 원문 글자 크기 대비 영어·한글 사이 간격 비율(0 이상)이에요. 낮추면 두 언어가 한 가사 묶음으로 모이고 묶음 사이 여백을 더 확보할 수 있어요.
  * auto_wrap_languages는 자동 줄바꿈할 언어 코드 목록이에요. en을 빼면 영어도 한 줄에 맞춰 축소하며 원문과 시간 정보는 바꾸지 않아요.
  * auto_wrap_min_font_scale은 자동 줄바꿈 언어의 기본 글자 크기 대비 최소 비율(0~1)이에요. 0.8이면 기본 크기의 80% 아래로 줄이지 않아요. 높이면 읽기 쉬워지지만 공간이 부족할 때 주변 가사가 더 자주 생략돼요.
  * 나머지 글자 크기 비율·색상·투명도·무음 길이·반복 기준은 공통 설정과 같은 단위와 효과를 가져요.
@@ -320,12 +320,53 @@ export const MAKE_ENG_POP_LYRICS_CONFIG = {
   "target_language": "ko",
   "source_label": "영어",
   "target_label": "한글",
+  "context_slot_gap_ratio": 0.2,
+  "language_gap_ratio": 0.4,
   "auto_wrap_languages": ["en"],
   "auto_wrap_min_font_scale": 0.8,
   "translation_model": "facebook/nllb-200-distilled-600M",
   "translation_family": "nllb",
   "translation_source_tag": "eng_Latn",
   "translation_target_tag": "kor_Hang"
+};
+
+/**
+ * 합치기 영상의 일본어 곡 설정. 나머지 값은 MAKE_K_POP_LYRICS_CONFIG를 공유해요.
+ * source_language/target_language는 원문과 번역의 언어 코드이며, 바꾸면 인식과 표시 순서가 달라져요.
+ * source_label/target_label은 안내에 표시할 언어 이름이에요.
+ * source_font_candidates는 일본어 원문 폰트 경로 목록이에요. 앞에서부터 존재하는 폰트를 사용해요.
+ * ja_color는 일본어 글자색(RGB 문자열 또는 "auto")이에요. "auto"는 배경 밝기에 맞춰 색을 골라요.
+ * translation_model은 로컬 번역 모델 ID, translation_family는 모델 종류예요. 바꾸면 번역 품질과 다운로드 용량이 달라져요.
+ * translation_source_tag/translation_target_tag는 NLLB 원문/번역 언어 태그예요. 바꾸면 모델에서 사용하는 언어가 달라져요.
+ * Python에서 JSON으로 읽으므로 큰따옴표와 JSON 문법을 유지해요.
+ */
+export const MAKE_JA_POP_LYRICS_CONFIG = {
+  "source_language": "ja",
+  "target_language": "ko",
+  "source_label": "일본어",
+  "target_label": "한글",
+  "source_font_candidates": ["C:/Windows/Fonts/YuGothM.ttc", "C:/Windows/Fonts/msgothic.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"],
+  "ja_color": "auto",
+  "translation_model": "facebook/nllb-200-distilled-600M",
+  "translation_family": "nllb",
+  "translation_source_tag": "jpn_Jpan",
+  "translation_target_tag": "kor_Hang"
+};
+
+/**
+ * make_total_merge.py의 합치기 설정. 나머지 값은 MAKE_K_POP_LYRICS_CONFIG를 공유해요.
+ * merge_input_folder/merge_output_folder는 macro/make_mp4 기준 상대 경로예요. 바꾸면 검색할 MP3와 저장할 MP4의 위치가 달라져요.
+ * merge_timestamp_output은 macro/make_mp4 기준 상대 경로예요. 바꾸면 --timestamp 보고서의 저장 위치가 달라져요.
+ * merge_flat_input은 입력 폴더에 바로 있는 곡을 한 묶음으로 처리할지 정해요(불리언). false면 하위 폴더별로 묶어요.
+ * merge_track_profiles는 가사 JSON의 원문 언어 코드와 가사 설정 이름을 연결해요. 바꾸면 언어별 표시 순서, 글꼴, 번역이 달라져요.
+ * Python에서 JSON으로 읽으므로 큰따옴표와 JSON 문법을 유지해요.
+ */
+export const MAKE_TOTAL_MERGE_LYRICS_CONFIG = {
+  "merge_input_folder": "total_merge",
+  "merge_output_folder": "result/total_merge",
+  "merge_timestamp_output": "result/total_merge_timestamp_result.txt",
+  "merge_flat_input": true,
+  "merge_track_profiles": {"ko": "k_pop", "en": "eng_pop", "ja": "ja_pop"}
 };
 
 /**

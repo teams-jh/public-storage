@@ -47,31 +47,30 @@ class LyricsTests(unittest.TestCase):
                         self.assertEqual(alpha, round(255 * config["context_opacity"]))
                     self.assertEqual(active["Line B"][-1], 255)
 
-    def test_waiting_timeline_preserves_intro_gap_and_song_duration(self):
+    def test_early_vocal_end_does_not_interrupt_current_lyric(self):
         background = Image.new("RGB", (640, 360), "black")
         cues = [dict(start=10, end=12, en="First", ko="첫 가사"),
-                dict(start=20, end=22, en="Second", ko="두 번째 가사"),
+                dict(start=20, end=20.1, en="Second", ko="두 번째 가사"),
                 dict(start=22.5, end=24, en="Third", ko="세 번째 가사")]
-        for threshold in (2, 8, 9):
-            with self.subTest(threshold=threshold), tempfile.TemporaryDirectory() as directory:
-                config = dict(video.settings("eng_pop"), waiting_min_gap_seconds=threshold)
+        for end in (10.01, 12, 18, 20):
+            with self.subTest(end=end), tempfile.TemporaryDirectory() as directory:
+                cues[0]["end"] = end
+                config = video.settings("eng_pop")
                 with patch.object(video, "lyric_frame", return_value=background) as render:
                     timeline = video.render_track_frames(background, cues, Decimal(30), config,
                                                          config["rect"], None, Path(directory))
                 self.assertEqual(sum(length for _, length in timeline), Decimal(30))
                 self.assertTrue(all(length > 0 and path.is_file() for path, length in timeline))
                 actual = [(path.name, length) for path, length in timeline]
-                expected = [("waiting_0.png", Decimal(10))]
-                expected += ([("cue_0.png", Decimal(2)), ("waiting_1.png", Decimal(8))]
-                             if threshold <= 8 else [("cue_0.png", Decimal(10))])
-                expected += [("cue_1.png", Decimal("2.5")), ("cue_2.png", Decimal("7.5"))]
+                expected = [("waiting_0.png", Decimal(10)), ("cue_0.png", Decimal(10)),
+                            ("cue_1.png", Decimal("2.5")), ("cue_2.png", Decimal("7.5"))]
                 self.assertEqual(actual, expected)
                 waiting_indices = [call.args[2] for call in render.call_args_list if call.kwargs.get("waiting")]
-                self.assertEqual(waiting_indices, [0, 1] if threshold <= 8 else [0])
+                self.assertEqual(waiting_indices, [0])
 
     def test_waiting_handles_instrumentals_and_contiguous_cues(self):
         background = Image.new("RGB", (640, 360), "black")
-        config = dict(video.settings(), waiting_min_gap_seconds=0)
+        config = video.settings()
         for cues in ([], [dict(start=0, end=1, en="First", ko="첫 가사"),
                           dict(start=1, end=2, en="Second", ko="다음 가사")]):
             with self.subTest(cues=cues), tempfile.TemporaryDirectory() as directory:
@@ -85,7 +84,7 @@ class LyricsTests(unittest.TestCase):
                     render.assert_not_called()
                     self.assertIsNone(ImageChops.difference(background, Image.open(timeline[0][0])).getbbox())
 
-    def test_waiting_mp4_changes_at_vocal_boundaries(self):
+    def test_waiting_mp4_highlight_lasts_until_next_lyric(self):
         import imageio_ffmpeg
 
         config = video.settings("eng_pop")
@@ -99,7 +98,7 @@ class LyricsTests(unittest.TestCase):
         fps = int(video.global_number("MAKE_K_POP_VIDEO_FPS"))
         samples = {round(seconds * fps): key for seconds, key in
                    [(0.2, (0, True)), (0.46, (0, True)), (0.54, (0, False)),
-                    (0.96, (0, False)), (1.04, (1, True)), (2.96, (1, True)),
+                    (0.96, (0, False)), (1.04, (0, False)), (2.96, (0, False)),
                     (3.04, (1, False)), (3.8, (1, False))]}
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
@@ -333,6 +332,48 @@ class LyricsTests(unittest.TestCase):
             self.assertEqual(result[0]["en"], "Hello world")
             self.assertEqual(result[0]["ko"], "안녕하세요")
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["source_language"], "en")
+
+    def test_foreign_source_uses_complete_bilingual_cues_without_rewriting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            mp3 = Path(directory) / "song.mp3"
+            mp3.write_bytes(b"audio")
+            path = mp3.with_suffix(".lyrics.json")
+            data = dict(source_language="es", review_required=True,
+                        source_sha256=video.hashlib.sha256(mp3.read_bytes()).hexdigest(),
+                        cues=[dict(start=0.1, end=0.8, source_text="Hola", en="Hello", ko="안녕하세요")])
+            video.save_json(path, data)
+            original = path.read_bytes()
+            for profile in ("eng_pop", "k_pop"):
+                for offline in (True, False):
+                    with self.subTest(profile=profile, offline=offline), \
+                            patch.object(video, "transcribe") as recognition, \
+                            patch.object(video, "translate_text") as translation:
+                        cues = video.load_lyrics(path, mp3, 1, argparse.Namespace(offline=offline),
+                                                 video.settings(profile))
+                        self.assertEqual(cues, data["cues"])
+                        self.assertEqual(path.read_bytes(), original)
+                        recognition.assert_not_called()
+                        translation.assert_not_called()
+            data["source_sha256"] = "different audio"
+            video.save_json(path, data)
+            with self.assertRaisesRegex(ValueError, "음원이 바뀌었어요"):
+                video.load_lyrics(path, mp3, 1, argparse.Namespace(offline=True), video.settings("eng_pop"))
+
+    def test_foreign_source_rejects_missing_translations_and_invalid_times(self):
+        with tempfile.TemporaryDirectory() as directory:
+            mp3 = Path(directory) / "song.mp3"
+            mp3.write_bytes(b"audio")
+            path = mp3.with_suffix(".lyrics.json")
+            cue = dict(start=0.1, end=0.8, source_text="Hola", en="Hello", ko="안녕하세요")
+            for change in (dict(en=""), dict(ko=""), dict(ko=None), dict(end=2), dict(start=float("nan"))):
+                video.save_json(path, dict(source_language="es", cues=[dict(cue, **change)]))
+                for offline in (True, False):
+                    with self.subTest(change=change, offline=offline), \
+                            patch.object(video, "translate_text") as translation:
+                        with self.assertRaises(ValueError):
+                            video.load_lyrics(path, mp3, 1, argparse.Namespace(offline=offline),
+                                              video.settings("eng_pop"))
+                        translation.assert_not_called()
 
     def test_eng_pop_places_smaller_korean_below_english(self):
         from PIL import ImageDraw
@@ -628,6 +669,46 @@ class LyricsTests(unittest.TestCase):
             video.save_json(path, data)
             with self.assertRaisesRegex(ValueError, "음원이 바뀌었어요"):
                 video.load_lyrics(path, mp3, 3, args, video.settings())
+
+    def test_individual_videos_match_merge_loudness_for_both_profiles(self):
+        import lyrics_merge
+
+        self.assertIs(lyrics_merge.normalize_track, video.normalize_track)
+        ffmpeg = video.find_ffmpeg()
+        target = float(video.global_number("MAKE_POP_MERGE_TARGET_LOUDNESS_LUFS"))
+
+        def loudness(path):
+            result = subprocess.run(
+                [ffmpeg, "-nostdin", "-hide_banner", "-i", str(path), "-vn",
+                 "-af", "loudnorm=print_format=json", "-f", "null", "-"],
+                capture_output=True, encoding="utf-8", errors="replace", check=True,
+            )
+            return float(json.JSONDecoder().raw_decode(result.stderr[result.stderr.rfind("{"):])[0]["input_i"])
+
+        originals, outputs = [], []
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            image = folder / "background.png"
+            Image.new("RGB", (320, 180), "black").save(image)
+            for profile, gain in (("k_pop", "0.1"), ("eng_pop", "4")):
+                with self.subTest(profile=profile):
+                    mp3 = folder / f"{profile}.mp3"
+                    output = folder / f"{profile}.mp4"
+                    subprocess.run(
+                        [ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
+                         "sine=frequency=440:duration=3", "-af", f"volume={gain}", str(mp3)],
+                        check=True,
+                    )
+                    video.save_json(mp3.with_suffix(".lyrics.json"), dict(cues=[]))
+                    config = video.settings(profile)
+                    args = argparse.Namespace(offline=True, prepare_only=False)
+                    video.render_video(ffmpeg, mp3, image, output, args, config, config["rect"], None)
+                    originals.append(loudness(mp3))
+                    outputs.append(loudness(output))
+                    self.assertAlmostEqual(outputs[-1], target, delta=0.5)
+                    self.assertAlmostEqual(float(video.audio_duration_seconds(ffmpeg, output)), 3, delta=0.1)
+            self.assertGreater(abs(originals[0] - originals[1]), 20)
+            self.assertAlmostEqual(outputs[0], outputs[1], delta=0.5)
 
     def test_mp4_cue_changes_gaps_repeat_boundary_and_audio(self):
         ffmpeg = video.find_ffmpeg()

@@ -4,7 +4,6 @@ import argparse
 from contextlib import contextmanager
 from decimal import Decimal
 from itertools import chain, repeat
-import json
 from pathlib import Path
 import re
 import subprocess
@@ -17,7 +16,9 @@ from lyrics_video import (
     encode_timeline,
     find_font,
     load_lyrics,
+    normalize_track,
     parse_rect,
+    read_lyrics_data,
     render_track_frames,
     settings,
 )
@@ -48,7 +49,7 @@ def print_merge_plan(output, songs, count):
 
 @contextmanager
 def track_log(mp3, image):
-    """두 합치기 스크립트에서 작업 중인 파일과 오류 원인을 함께 보여줘요."""
+    """작업 중인 파일과 오류 원인을 함께 보여줘요."""
     paths = (f"음원: {mp3.resolve()}\n"
              f"가사 JSON: {mp3.with_suffix('.lyrics.json').resolve()}\n"
              f"배경 이미지: {image.resolve()}")
@@ -59,32 +60,11 @@ def track_log(mp3, image):
         raise RuntimeError(f"곡을 처리하지 못했어요.\n{paths}\n원인: {exc}") from exc
 
 
-def normalize_track(ffmpeg, source, output, target_loudness, max_true_peak):
-    """곡 전체를 측정한 뒤 한 가지 게인을 적용해 곡 안의 음량 차이를 유지해요."""
-    command = [ffmpeg, "-nostdin", "-hide_banner", "-i", str(source)]
-    measured = subprocess.run(
-        [*command, "-af", "loudnorm=print_format=json", "-f", "null", "-"],
-        stderr=subprocess.PIPE, encoding="utf-8", errors="replace", check=True,
-    )
-    report = re.search(r'\{\s*"input_i"\s*:[^}]+\}', measured.stderr)
-    if report is None:
-        raise RuntimeError("곡의 음량을 읽을 수 없어요. FFmpeg에서 loudnorm 필터를 쓸 수 있는지 확인해 주세요.")
-
-    stats = json.loads(report.group())
-    loudness = Decimal(stats["input_i"])
-    true_peak = Decimal(stats["input_tp"])
-    # 무음이나 측정 기준보다 짧은 곡에는 증폭을 적용하지 않아요.
-    target_gain = target_loudness - loudness if loudness.is_finite() else Decimal(0)
-    gain = min(target_gain, max_true_peak - true_peak)
-    if gain == 0:
-        source.replace(output)
-        return
-
-    subprocess.run(
-        [*command, "-v", "error", "-af", f"volume={gain:f}dB", "-c:a", "pcm_s16le", str(output)],
-        check=True,
-    )
-    source.unlink()
+def language_settings(config, language):
+    profiles = config["merge_track_profiles"]
+    if not isinstance(language, str) or language not in profiles:
+        raise ValueError(f"원문 언어를 {', '.join(profiles)} 중 하나로 지정해 주세요.")
+    return dict(settings(profiles[language]), translation_backend=config["translation_backend"])
 
 
 def merge_folder(ffmpeg, tracks, output, args, config, wav_options, *, sample_rate, count):
@@ -106,7 +86,17 @@ def merge_folder(ffmpeg, tracks, output, args, config, wav_options, *, sample_ra
                 track.mkdir()
                 wav = track / "audio.wav"
                 track_duration = decode_wav(ffmpeg, mp3, source_wav, wav_options)
-                cues = load_lyrics(mp3.with_suffix(".lyrics.json"), mp3, float(track_duration), args, config)
+                lyrics_path = mp3.with_suffix(".lyrics.json")
+                data = None
+                track_config = config
+                if "merge_track_profiles" in config:
+                    data = read_lyrics_data(lyrics_path)
+                    if data.get("cues") != []:
+                        track_config = language_settings(config, data.get("source_language", config["source_language"]))
+                cues = load_lyrics(lyrics_path, mp3, float(track_duration), args, track_config, data=data)
+                source_font_path = None
+                if cues and "source_font_candidates" in track_config:
+                    source_font_path = find_font(track_config, args.font, source=True)
                 normalize_track(ffmpeg, source_wav, wav, target_loudness, max_true_peak)
                 with Image.open(image) as opened:
                     background = ImageOps.exif_transpose(opened).convert("RGB")
@@ -114,7 +104,8 @@ def merge_folder(ffmpeg, tracks, output, args, config, wav_options, *, sample_ra
                     canvas = background.size
                 if background.size != canvas:
                     background = ImageOps.pad(background, canvas, color="black")
-                timeline.extend(render_track_frames(background, cues, track_duration, config, args.rect, font_path, track))
+                timeline.extend(render_track_frames(background, cues, track_duration, track_config,
+                                                    args.rect, font_path, track, source_font_path=source_font_path))
                 audio_entries.append(f"file '{wav.relative_to(work).as_posix()}'\n")
                 duration += track_duration
 
@@ -132,8 +123,10 @@ def merge_folder(ffmpeg, tracks, output, args, config, wav_options, *, sample_ra
             temporary.replace(output)
 
 
-def folder_tracks(root):
-    folders = sorted((path for path in root.iterdir() if path.is_dir()), key=lambda path: path.name.casefold())
+def folder_tracks(root, *, flat=False):
+    folders = [root.resolve()] if flat else sorted(
+        (path for path in root.iterdir() if path.is_dir()), key=lambda path: path.name.casefold()
+    )
     for folder in folders:
         songs = sorted(
             (path for path in folder.iterdir() if path.is_file() and path.suffix.lower() == ".mp3"),
@@ -186,24 +179,30 @@ def write_timestamps(folders, output, sample_rate, wav_options, dry_run):
 
 def main(profile="k_pop"):
     config = settings(profile)
+    flat = config.get("merge_flat_input", False)
+    track_profiles = config.get("merge_track_profiles")
     root = Path(__file__).resolve().parent
     automatic_repeat = object()
-    parser = argparse.ArgumentParser(description=__doc__)
+    description = "폴더에 있는 여러 언어의 곡을 이어 붙여요." if flat else __doc__
+    parser = argparse.ArgumentParser(description=description)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--merge", nargs="?", type=positive_count, const=automatic_repeat, metavar="횟수",
                       help="기존 가사 JSON으로 영상을 만들어요. 횟수를 생략하면 최소 재생 시간에 맞춰 반복해요.")
     mode.add_argument("--timestamp", action="store_true", help="폴더별 곡 시작 시각을 텍스트 파일 하나에 저장해요.")
     parser.add_argument("--folder", type=Path, default=root / config["merge_input_folder"],
-                        help="곡을 모아 둔 하위 폴더들이 있는 경로예요.")
+                        help="곡을 모아 둔 폴더예요." if flat else "곡을 모아 둔 하위 폴더들이 있는 경로예요.")
     parser.add_argument("--dry-run", action="store_true", help="결과를 저장하기 전에 미리 봐요.")
     parser.add_argument("--offline", action="store_true", help="가사를 만들 때 모델을 내려받거나 번역을 요청하지 않아요.")
-    parser.add_argument("--font", type=Path, help="한글 TTF/OTF 폰트 경로예요.")
+    parser.add_argument("--font", type=Path, help="가사에 사용할 폰트 파일 경로예요.")
     parser.add_argument("--rect", type=parse_rect, default=tuple(config["rect"]), help="가사 영역 x,y,너비,높이 비율이에요.")
     parser.add_argument("--model", default=config["model"], help="Whisper 모델 이름 또는 로컬 모델 폴더예요.")
     parser.add_argument("--device", default=config["device"], choices=("cpu", "cuda", "auto"))
     parser.add_argument("--compute-type", default=config["compute_type"])
     parser.add_argument("--translation-backend", choices=("local", "google"), default=config["translation_backend"],
                         help="번역 방식을 골라요. google을 고르면 가사 문장을 Google 번역에 보내요.")
+    if track_profiles:
+        parser.add_argument("--source-language", choices=track_profiles,
+                            help="가사 JSON이 없는 곡의 원문 언어를 골라요.")
     args = parser.parse_args()
     config["translation_backend"] = args.translation_backend
     args.offline = args.offline or args.merge is not None
@@ -212,11 +211,13 @@ def main(profile="k_pop"):
     wav_options = ("-ar", str(sample_rate),
                    "-ac", str(global_number("MAKE_POP_MERGE_AUDIO_CHANNELS")))
 
-    folders = folder_tracks(args.folder)
+    folders = folder_tracks(args.folder, flat=flat)
+    empty_folder = "폴더에 MP3가 없어요." if flat else "하위 폴더에 MP3가 없어요."
     if args.timestamp:
-        output = root / global_string(f"MAKE_{profile.upper()}_MERGE_TIMESTAMP_OUTPUT")
+        timestamp_output = config.get("merge_timestamp_output") or global_string(f"MAKE_{profile.upper()}_MERGE_TIMESTAMP_OUTPUT")
+        output = root / timestamp_output
         if not write_timestamps(folders, output, sample_rate, wav_options, args.dry_run):
-            print(f"하위 폴더에 MP3가 없어요. {args.folder}")
+            print(f"{empty_folder} {args.folder}")
         return 0
 
     ffmpeg = None
@@ -226,7 +227,12 @@ def main(profile="k_pop"):
         if args.merge is None:
             for mp3 in songs:
                 try:
-                    create_json_only(ffmpeg, mp3, args, config, wav_options)
+                    track_config = config
+                    if track_profiles and not mp3.with_suffix(".lyrics.json").exists() and not args.dry_run:
+                        if args.source_language is None:
+                            raise ValueError("--source-language로 곡의 원문 언어를 골라 주세요.")
+                        track_config = language_settings(config, args.source_language)
+                    create_json_only(ffmpeg, mp3, args, track_config, wav_options)
                 except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
                     failed = True
                     print(f"가사 JSON을 만들지 못했어요.\n음원: {mp3.resolve()}\n"
@@ -241,7 +247,8 @@ def main(profile="k_pop"):
             missing = [mp3.with_suffix(".lyrics.json").name for mp3 in songs
                        if not mp3.with_suffix(".lyrics.json").is_file()]
             if missing:
-                raise ValueError(f"--merge 없이 먼저 실행해 가사 JSON을 만들어 주세요. {', '.join(missing)}")
+                command = "--source-language로 원문 언어를 골라" if track_profiles else "--merge 없이 먼저"
+                raise ValueError(f"{command} 실행해 가사 JSON을 만들어 주세요. {', '.join(missing)}")
             output = result / f"{folder.name}.mp4"
             count = None if args.merge is automatic_repeat else args.merge
             if args.dry_run:
@@ -262,5 +269,5 @@ def main(profile="k_pop"):
             print(f"{folder.name} 영상을 만들지 못했어요.\n입력 폴더: {folder.resolve()}\n{exc}", file=sys.stderr)
 
     if not found:
-        print(f"하위 폴더에 MP3가 없어요. {args.folder}")
+        print(f"{empty_folder} {args.folder}")
     return int(failed)

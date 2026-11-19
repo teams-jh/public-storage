@@ -26,10 +26,8 @@ def settings(profile="k_pop"):
             raise ValueError(f"{name} 설정을 찾을 수 없어요.")
         return json.loads(match.group(1))
     config = read("MAKE_K_POP_LYRICS_CONFIG")
-    if profile == "eng_pop":
-        config.update(read("MAKE_ENG_POP_LYRICS_CONFIG"))
-    elif profile != "k_pop":
-        raise ValueError(f"지원하지 않는 가사 설정이에요: {profile}")
+    if profile != "k_pop":
+        config.update(read(f"MAKE_{profile.upper()}_LYRICS_CONFIG"))
     return config
 
 
@@ -132,28 +130,39 @@ def transcribe(mp3, config, args):
     return cues
 
 
-def load_lyrics(path, mp3, duration, args, config):
+def read_lyrics_data(path):
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    if isinstance(data, list):
+        return {"cues": data}
+    if not isinstance(data, dict):
+        raise ValueError("가사 JSON은 cues 목록이 있는 객체 또는 목록이어야 해요.")
+    return data
+
+
+def load_lyrics(path, mp3, duration, args, config, *, data=None):
     source_language, target_language = config["source_language"], config["target_language"]
     with mp3.open("rb") as source:
         digest = hashlib.file_digest(source, "sha256").hexdigest()
-    if path.exists():
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
-        if isinstance(data, list):
-            data = {"cues": data}
-        if not isinstance(data, dict):
-            raise ValueError("가사 JSON은 cues 목록이 있는 객체 또는 목록이어야 해요.")
+    if data is None and path.exists():
+        data = read_lyrics_data(path)
+    if data is not None:
         if data.get("source_sha256", digest) != digest:
             raise ValueError(f"음원이 바뀌었어요. {path.name}을 다른 이름으로 보관하고 다시 실행해 주세요.")
         if data.get("cues") == []:
             print(f"가사 목록이 비어 있어 배경과 음원만 이어 붙여요: {path.resolve()}", flush=True)
             return []
-        if data.get("source_language", source_language) != source_language:
-            raise ValueError(f"가사 원문 언어가 달라요. {path.name}의 source_language를 확인해 주세요.")
         if data.get("instrumental") is True:
             raise ValueError("연주곡은 cues를 빈 목록으로 저장해 주세요.")
+        if data.get("source_language", source_language) != source_language:
+            # 원문 언어와 화면에 표시할 언어는 다를 수 있어요.
+            # 완성된 한영 자막만 읽고, 다른 언어를 현재 번역 모델에 넘기지 않아요.
+            cues = validate_cues(data.get("cues"), duration)
+            print(f"원문 언어는 {data['source_language']}예요. 저장된 {config['source_label']}·"
+                  f"{config['target_label']} 가사를 사용해요: {path.resolve()}", flush=True)
+            return cues
     else:
         if args.offline:
-            raise ValueError(f"{path.name}이 없어요. --offline을 빼거나 한영 가사 JSON을 만들어 주세요.")
+            raise ValueError(f"{path.name}이 없어요. --offline을 빼거나 가사 JSON을 만들어 주세요.")
         cues = transcribe(mp3, config, args)
         previous_end = 0
         for cue in cues:
@@ -190,7 +199,7 @@ def load_lyrics(path, mp3, duration, args, config):
                     print(f"{config['target_label']} 가사를 저장했어요: {index}/{len(cues)}", flush=True)
                 except Exception as exc:
                     raise RuntimeError(f"{index}번째 번역을 받지 못했어요. 다시 실행하면 이어서 번역해요: {exc}") from exc
-    return validate_cues(cues, duration)
+    return cues
 
 
 @lru_cache(maxsize=None)
@@ -262,14 +271,16 @@ def translate_text(text, config):
         raise RuntimeError("Google 번역 결과를 읽지 못했어요. --translation-backend local로 실행해 주세요.") from exc
 
 
-def find_font(config, supplied):
-    for candidate in ([str(supplied)] if supplied else config["font_candidates"]):
+def find_font(config, supplied, *, source=False):
+    candidates = config["source_font_candidates"] if source else config["font_candidates"]
+    label = config["source_label"] if source else "한글"
+    for candidate in ([str(supplied)] if supplied else candidates):
         path = Path(candidate)
         if not supplied and not path.is_absolute():
             path = Path(__file__).resolve().parent / path
         if path.is_file():
             return str(path.resolve())
-    raise ValueError("한글 폰트가 없어요. --font로 한글 TTF/OTF 파일을 지정해 주세요.")
+    raise ValueError(f"{label} 폰트를 찾을 수 없어요. --font로 사용할 폰트 파일을 지정해 주세요.")
 
 
 def lyric_window(cues, current_index, radius):
@@ -314,7 +325,7 @@ def wrap_lyric_line(text, font, width):
     return best[0][-1] or [""]
 
 
-def lyric_frame(background, cues, current_index, config, font_path, rect, *, waiting=False):
+def lyric_frame(background, cues, current_index, config, font_path, rect, *, waiting=False, source_font_path=None):
     from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageStat
 
     image = background.convert("RGBA")
@@ -329,8 +340,9 @@ def lyric_frame(background, cues, current_index, config, font_path, rect, *, wai
     maximum = max(1, round(image.height * config["font_ratio"]))
     minimum = max(1, round(image.height * config["min_font_ratio"]))
     wrap_languages = config.get("auto_wrap_languages", [])
-    def line_layout(text, font_size, color, language=None):
-        font = ImageFont.truetype(font_path, font_size)
+    def line_layout(text, font_size, color, language):
+        path = source_font_path if source_font_path and language == config["source_language"] else font_path
+        font = ImageFont.truetype(path, font_size)
         stroke = max(1, round(font_size * config["stroke_ratio"])) * config["stroke_multiplier"]
         bold = max(0, round(font_size * config["bold_ratio"]))
         padding = bold + stroke
@@ -352,7 +364,8 @@ def lyric_frame(background, cues, current_index, config, font_path, rect, *, wai
              config[f"{config['target_language']}_color"]),
         )
         language_gap = size * config["language_gap_ratio"]
-        normal_height = sum(line_layout("", font_size, color)[-1] for _, font_size, color in styles)
+        normal_height = sum(line_layout("", font_size, color, language)[-1]
+                            for language, font_size, color in styles)
         if normal_height + language_gap <= available_height:
             break
     else:
@@ -383,7 +396,8 @@ def lyric_frame(background, cues, current_index, config, font_path, rect, *, wai
     slot_gap = slot_height - available_height
     if any(total > available_height for _, _, total, _ in layouts):
         if wrap_languages:
-            slot_sizes = [slot_gap] * len(slot_sizes)
+            # 여백은 보이는 가사 묶음에만 배정해 긴 현재 가사의 공간을 남겨요.
+            slot_sizes = [0] * len(slot_sizes)
         for offset, _, total, _ in layouts:
             slot_sizes[offset + radius] = total + slot_gap
         while sum(slot_sizes) > height:
@@ -398,7 +412,7 @@ def lyric_frame(background, cues, current_index, config, font_path, rect, *, wai
                     row = max((row for row, (offset, _, _, _) in enumerate(layouts) if offset != 0),
                               key=lambda row: abs(layouts[row][0]))
                     offset, _, _, _ = layouts.pop(row)
-                    slot_sizes[offset + radius] = slot_gap
+                    slot_sizes[offset + radius] = 0
                     continue
                 raise ValueError("가사 영역의 높이가 부족해요. JSON에서 구간을 나누거나 --rect를 넓혀 주세요.")
             row, language = max(candidates, key=lambda item: layouts[item[0]][1][item[1]][-1])
@@ -458,6 +472,34 @@ def decode_wav(ffmpeg, mp3, wav, output_options=()):
         return Decimal(audio.getnframes()) / Decimal(audio.getframerate())
 
 
+def normalize_track(ffmpeg, source, output, target_loudness, max_true_peak):
+    """곡 전체를 측정한 뒤 한 가지 게인을 적용해 곡 안의 음량 차이를 유지해요."""
+    command = [ffmpeg, "-nostdin", "-hide_banner", "-i", str(source)]
+    measured = subprocess.run(
+        [*command, "-af", "loudnorm=print_format=json", "-f", "null", "-"],
+        stderr=subprocess.PIPE, encoding="utf-8", errors="replace", check=True,
+    )
+    report = re.search(r'\{\s*"input_i"\s*:[^}]+\}', measured.stderr)
+    if report is None:
+        raise RuntimeError("곡의 음량을 읽을 수 없어요. FFmpeg에서 loudnorm 필터를 쓸 수 있는지 확인해 주세요.")
+
+    stats = json.loads(report.group())
+    loudness = Decimal(stats["input_i"])
+    true_peak = Decimal(stats["input_tp"])
+    # 무음이나 측정 기준보다 짧은 곡에는 증폭을 적용하지 않아요.
+    target_gain = target_loudness - loudness if loudness.is_finite() else Decimal(0)
+    gain = min(target_gain, max_true_peak - true_peak)
+    if gain == 0:
+        source.replace(output)
+        return
+
+    subprocess.run(
+        [*command, "-v", "error", "-af", f"volume={gain:f}dB", "-c:a", "pcm_s16le", str(output)],
+        check=True,
+    )
+    source.unlink()
+
+
 def create_json_only(ffmpeg, mp3, args, config, wav_options=()):
     path = mp3.with_suffix(".lyrics.json")
     # 사용자가 수정한 파일과 미완성 파일도 옵션 3에서는 그대로 두어요.
@@ -473,34 +515,24 @@ def create_json_only(ffmpeg, mp3, args, config, wav_options=()):
     print(f"가사 JSON을 만들었어요: {path.name}", flush=True)
 
 
-def render_track_frames(background, cues, duration, config, rect, font_path, work):
-    """노래 중인 가사와 발화 전 대기 가사를 정확한 시간에 보여줘요."""
+def render_track_frames(background, cues, duration, config, rect, font_path, work, *, source_font_path=None):
+    """첫 가사는 미리 대기시키고, 시작 후에는 다음 가사 시작까지 강조해요."""
     if not cues:
         blank = work / "blank.png"
         background.save(blank)
         return [(blank, duration)]
     starts = [Decimal(str(cue["start"])) for cue in cues]
-    minimum_gap = Decimal(str(config["waiting_min_gap_seconds"]))
     timeline = []
-
-    def append_waiting(index, length):
-        path = work / f"waiting_{index}.png"
-        lyric_frame(background, cues, index, config, font_path, rect, waiting=True).save(path)
-        timeline.append((path, length))
-
     if starts[0] > 0:
-        append_waiting(0, starts[0])
+        path = work / "waiting_0.png"
+        lyric_frame(background, cues, 0, config, font_path, rect,
+                    waiting=True, source_font_path=source_font_path).save(path)
+        timeline.append((path, starts[0]))
     for index, (start, next_start) in enumerate(zip(starts, starts[1:] + [duration])):
         path = work / f"cue_{index}.png"
-        lyric_frame(background, cues, index, config, font_path, rect).save(path)
-        end = Decimal(str(cues[index]["end"]))
-        gap = next_start - end
-        if index + 1 < len(cues) and gap > 0 and gap >= minimum_gap:
-            timeline.append((path, end - start))
-            append_waiting(index + 1, gap)
-        else:
-            # 짧은 호흡과 마지막 가사 뒤에는 현재 화면을 유지해요.
-            timeline.append((path, next_start - start))
+        lyric_frame(background, cues, index, config, font_path, rect, source_font_path=source_font_path).save(path)
+        # end는 실제 보컬보다 빠를 수 있어요. 다음 가사의 start까지 현재 가사를 유지해요.
+        timeline.append((path, next_start - start))
     return timeline
 
 
@@ -533,13 +565,17 @@ def render_video(ffmpeg, mp3, image_path, output, args, config, rect, font_path)
     from PIL import Image, ImageOps
     with tempfile.TemporaryDirectory(prefix="make_mp4_") as directory:
         work = Path(directory)
+        source_wav = work / "source.wav"
         wav = work / "audio.wav"
         # PCM 반복으로 MP3 인코더 지연이 반복 경계마다 누적되지 않게 해요.
-        duration = decode_wav(ffmpeg, mp3, wav)
+        duration = decode_wav(ffmpeg, mp3, source_wav)
         cues = load_lyrics(mp3.with_suffix(".lyrics.json"), mp3, float(duration), args, config)
         print(f"가사 {len(cues)}구간을 준비했어요: {mp3.stem}", flush=True)
         if args.prepare_only:
             return
+        normalize_track(ffmpeg, source_wav, wav,
+                        global_number("MAKE_POP_MERGE_TARGET_LOUDNESS_LUFS"),
+                        global_number("MAKE_POP_MERGE_MAX_TRUE_PEAK_DBTP"))
         with Image.open(image_path) as opened:
             background = ImageOps.exif_transpose(opened).convert("RGB")
         timeline = render_track_frames(background, cues, duration, config, rect, font_path, work)
