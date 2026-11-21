@@ -11,6 +11,8 @@ from threading import Event, Lock, Thread
 class BulkUploadControl:
     def __init__(self, settings):
         self.settings = settings["skip_hotkey"]
+        self.completion_wait = settings["youtube_completion_wait_seconds"]
+        self.post_submit_wait = settings["youtube_post_submit_wait_seconds"]
         self.skip = Event()
         self.ready = Event()
         self.lock = Lock()
@@ -84,7 +86,7 @@ class BulkUploadControl:
         payload = dict(metadata)
         payload.pop("scheduled_at", None)
         command = [sys.executable, "-u", "-B", str(Path(__file__).with_name("bulk_upload_worker.py")),
-                   platform, str(path.resolve()), json.dumps(payload, ensure_ascii=True)]
+                   platform, str(path.resolve()), str(self.completion_wait), str(self.post_submit_wait), json.dumps(payload, ensure_ascii=True)]
         process = subprocess.Popen(command)
         with self.lock:
             self.skip.clear()

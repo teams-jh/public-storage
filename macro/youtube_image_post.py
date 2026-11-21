@@ -450,16 +450,16 @@ class YouTubeImagePostUploader(BaseUploader):
                 else:
                     self._publish(page, composer)
 
-                for _, deadline in self.submission_checks(page, "YouTube 게시글 완료 확인"):
+                deadline = upload_monotonic() + UPLOAD_TIMEOUT_SECONDS
+                while upload_monotonic() < deadline:
                     if not composer.is_visible() or (
                         _visible(composer.locator("#unopened-dialog")) is not None
                         and _visible(composer.locator("[contenteditable='true']")) is None
                     ):
                         self.logger.info("YouTube 게시글 작성이 끝나 작성창이 닫히거나 초기화됐어요.")
-                        self.save_result_screenshot(
-                            page, "scheduled" if scheduled_at else "uploaded", deadline=deadline
-                        )
+                        self.save_result_screenshot(page, "scheduled" if scheduled_at else "uploaded")
                         return True
+                    page.wait_for_timeout(500)
                 self.logger.error("게시글 완료 화면을 확인하지 못했어요. 중복 게시를 피하려면 먼저 채널에서 확인해 주세요.")
                 return False
             except Exception as exc:

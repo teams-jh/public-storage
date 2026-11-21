@@ -11,15 +11,17 @@ from platforms.scheduling import (
     get_scheduled_at,
 )
 from config import (
-    CONFIG, FORCE_BROWSER_UPLOAD, SESSION_DIR, get_media_type, LOGIN_TIMEOUT_SECONDS,
-    get_dynamic_upload_timeout, get_media_size_mb,
+    CONFIG, FORCE_BROWSER_UPLOAD, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
+    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb,
     UPLOAD_FAILURE_BROWSER_HOLD_SECONDS,
 )
 
 class YouTubeUploader(BaseUploader):
-    def __init__(self):
+    def __init__(self, completion_wait_seconds=None, post_submit_wait_seconds=None):
         super().__init__("YouTube")
         self.client_secrets_file = CONFIG.get("YOUTUBE_CLIENT_SECRETS_FILE")
+        self.completion_wait_seconds = completion_wait_seconds
+        self.post_submit_wait_seconds = post_submit_wait_seconds
         self.submission_unconfirmed = False
 
     @contextmanager
@@ -224,9 +226,22 @@ class YouTubeUploader(BaseUploader):
         target.scroll_into_view_if_needed()
         self.logger.info("YouTube aria-label='예약'인 모달 하단 버튼을 찾았어요.")
 
+        def click_was_accepted():
+            try:
+                return (
+                    not target.is_visible()
+                    or not target.is_enabled()
+                    or target.get_attribute("aria-disabled") == "true"
+                )
+            except Exception:
+                return True
+
         try:
             target.click(timeout=5000)
-            return True
+            self.logger.info("YouTube aria-label='예약' 버튼 클릭 완료")
+            page.wait_for_timeout(2500)
+            if click_was_accepted():
+                return True
         except Exception as error:
             self.logger.warning(f"YouTube 예약 버튼 기본 클릭 재시도 중: {error}")
 
@@ -237,41 +252,119 @@ class YouTubeUploader(BaseUploader):
                     box["x"] + box["width"] / 2,
                     box["y"] + box["height"] / 2,
                 )
-                return True
+                self.logger.info("YouTube aria-label='예약' 버튼 중앙 좌표 클릭 완료")
+                page.wait_for_timeout(2500)
+                if click_was_accepted():
+                    return True
         except Exception as error:
             self.logger.warning(f"YouTube 예약 버튼 좌표 클릭 재시도 중: {error}")
 
         try:
             target.focus()
             target.press("Enter")
-            return True
+            self.logger.info("YouTube aria-label='예약' 버튼 Enter 입력 완료")
+            page.wait_for_timeout(2500)
+            if click_was_accepted():
+                return True
         except Exception as error:
             self.logger.warning(f"YouTube 예약 버튼 Enter 입력 실패: {error}")
 
-        self.logger.error("YouTube 예약 버튼을 누르지 못했어요.")
+        self.logger.error("YouTube 예약 버튼을 눌렀지만 화면이 전환되지 않았어요.")
         return False
 
-    def _finish_after_submission(self, page, browser_state, scheduled_at=None) -> bool:
-        browser_state["skip_failure_hold"] = True
-        self.submission_unconfirmed = True
-        visibility_form = page.locator("ytcp-video-visibility-select:visible")
-        completion_signals = page.locator(
-            "a[href*='youtu.be']:visible, a.ytcp-video-info:visible, #close-button:visible, "
-            "button:has-text('닫기'):visible, button:has-text('Close'):visible"
-        )
-        for _, deadline in self.submission_checks(page, "YouTube 서버 처리 완료 확인"):
-            # 업로드 작성창에도 영상 링크가 보일 수 있어요.
-            if not visibility_form.count() and completion_signals.count():
-                self.logger.info("YouTube 완료 화면을 확인했어요.")
-                self.submission_unconfirmed = False
-                browser_state["succeeded"] = True
-                self.save_result_screenshot(
-                    page, "scheduled" if scheduled_at else "uploaded", deadline=deadline
+    def _close_completion_dialog(self, page) -> bool:
+        """예약 등록 후 표시되는 처리 중/완료 모달의 닫기 버튼을 누릅니다."""
+        close_buttons = page.get_by_role("button", name="닫기", exact=True)
+        try:
+            close_buttons.last.wait_for(state="visible", timeout=30000)
+        except Exception:
+            close_buttons = page.get_by_role("button", name="Close", exact=True)
+            try:
+                close_buttons.last.wait_for(state="visible", timeout=5000)
+            except Exception:
+                close_buttons = page.locator(
+                    "#close-button button:visible, #close-button:visible, "
+                    "button[aria-label='닫기']:visible, button[aria-label='Close']:visible"
                 )
-                return True
+                try:
+                    close_buttons.last.wait_for(state="visible", timeout=5000)
+                except Exception:
+                    self.logger.error("YouTube 처리 완료 모달의 [닫기] 버튼을 찾지 못했어요.")
+                    return False
 
-        self.logger.warning("YouTube 완료를 확인하지 못했어요. 다시 올리기 전에 콘텐츠 목록을 확인해 주세요.")
-        return False
+        visible_buttons = []
+        for index in range(close_buttons.count()):
+            candidate = close_buttons.nth(index)
+            try:
+                box = candidate.bounding_box()
+                if candidate.is_visible() and box:
+                    visible_buttons.append((box["y"], candidate))
+            except Exception:
+                continue
+        if not visible_buttons:
+            self.logger.error("YouTube 화면에 보이는 [닫기] 버튼을 찾지 못했어요.")
+            return False
+
+        target = max(visible_buttons, key=lambda item: item[0])[1]
+        try:
+            target.scroll_into_view_if_needed()
+            target.click(timeout=5000)
+        except Exception:
+            try:
+                target.click(force=True, timeout=3000)
+            except Exception:
+                try:
+                    target.evaluate("element => element.click()")
+                except Exception as error:
+                    self.logger.error(f"YouTube [닫기] 버튼 클릭에 실패했어요: {error}")
+                    return False
+
+        try:
+            target.wait_for(state="hidden", timeout=10000)
+        except Exception:
+            self.logger.error("YouTube [닫기] 클릭 후 처리 완료 모달이 닫히지 않았어요.")
+            return False
+
+        self.logger.info("YouTube 처리 완료 모달 [닫기] 버튼 클릭 완료")
+        return True
+
+    def _finish_after_submission(self, page, browser_state) -> bool:
+        """일괄 업로드는 게시 버튼 클릭 후 지정 시간만 기다리고 브라우저를 닫아요."""
+        browser_state["skip_failure_hold"] = True
+        self.wait_with_countdown(page, self.post_submit_wait_seconds, "YouTube 서버 처리 완료 확인")
+        # 완료 모달의 닫기 버튼을 기다리거나 후속 대기를 추가하지 않아요.
+        try:
+            links = page.locator("a[href*='youtu.be'], a.ytcp-video-info")
+            buttons = page.locator("#close-button, button:has-text('닫기'), button:has-text('Close')")
+            confirmed = any(links.nth(i).is_visible() for i in range(links.count())) or any(
+                buttons.nth(i).is_visible() for i in range(buttons.count())
+            )
+        except Exception as error:
+            self.logger.warning(f"YouTube 완료 화면을 확인하지 못했어요: {error}")
+            confirmed = False
+        self.submission_unconfirmed = not confirmed
+        browser_state["succeeded"] = confirmed
+        if confirmed:
+            self.logger.info("YouTube 완료 화면을 확인했어요. 다음 작업으로 넘어가요.")
+        else:
+            self.logger.warning("YouTube 대기 시간이 끝났어요. 완료를 확인하지 못한 항목으로 기록하고 다음 작업으로 넘어가요.")
+        return confirmed
+
+    def _finish_browser_upload(self, page, browser_state, video_path, scheduled_at) -> bool:
+        """완료 모달을 닫은 뒤 지정된 시간만 기다리고 업로드를 마쳐요."""
+        if not self._close_completion_dialog(page):
+            return False
+        sync_buffer = (
+            self.completion_wait_seconds
+            if self.completion_wait_seconds is not None
+            else get_dynamic_sync_buffer(video_path)
+        )
+        self.wait_with_countdown(page, sync_buffer, "YouTube 업로드 완료 후 대기")
+        result_name = "예약 업로드" if scheduled_at else "업로드"
+        self.logger.info(f"🎉 YouTube 최종 {result_name} 완료!")
+        self.save_result_screenshot(page, "scheduled" if scheduled_at else "uploaded")
+        browser_state["succeeded"] = True
+        return True
 
     def upload(self, media_path: Path, metadata: dict) -> bool:
         """
@@ -313,7 +406,10 @@ class YouTubeUploader(BaseUploader):
         if secrets_path.exists() and not FORCE_BROWSER_UPLOAD:
             try:
                 self.logger.info("YouTube Data API v3를 통해 업로드를 시작합니다...")
-                return self._upload_via_api(media_path, title, description, tags, scheduled_at)
+                result = self._upload_via_api(media_path, title, description, tags, scheduled_at)
+                if result and self.post_submit_wait_seconds is not None:
+                    time.sleep(self.post_submit_wait_seconds)
+                return result
             except Exception as e:
                 self.logger.error(f"YouTube API 업로드 중 오류: {e}. Playwright 모드로 전환합니다.")
 
@@ -546,7 +642,40 @@ class YouTubeUploader(BaseUploader):
                             self.logger.error(f"YouTube [{action_name}] 버튼 클릭에 실패했어요.")
                             return False
 
-                    return self._finish_after_submission(page, browser_state, scheduled_at)
+                    if self.post_submit_wait_seconds is not None:
+                        return self._finish_after_submission(page, browser_state)
+
+                    self.logger.info(f"{action_name} 버튼 클릭 완료! 서버 처리 및 링크 생성 대기 중 (최대 {upload_timeout}초)...")
+
+                    # 업로드 완료 및 링크 생성 확인 대기 (최대 upload_timeout초)
+                    yt_done = False
+                    for wait_i in range(upload_timeout):
+                        self.log_wait_progress(
+                            "YouTube 서버 처리 완료 확인", wait_i, upload_timeout
+                        )
+                        page.wait_for_timeout(1000)
+                        # 완료 다이얼로그에 유튜브 링크 또는 닫기 버튼이 생성된 경우
+                        yt_link = page.locator("a[href*='youtu.be'], a.ytcp-video-info")
+                        close_btn = page.locator("#close-button, button:has-text('닫기'), button:has-text('Close')")
+
+                        if yt_link.count() > 0:
+                            href = yt_link.first.get_attribute("href") or ""
+                            self.logger.info(f"🎉 YouTube 동영상 게시 완료! 링크: {href}")
+                            yt_done = True
+                            break
+                        elif close_btn.count() > 0 and close_btn.first.is_visible():
+                            yt_done = True
+                            self.logger.info("🎉 YouTube 동영상 게시 완료 확인 (완료 창 노출)!")
+                            break
+
+                    if yt_done:
+                        return self._finish_browser_upload(
+                            page, browser_state, video_path, scheduled_at
+                        )
+                    else:
+                        self.logger.warning("YouTube 서버 처리 완료 확인을 받지 못했습니다.")
+                        page.wait_for_timeout(5000)
+                        return False
 
                 self.logger.error("YouTube 업로드 input을 찾지 못했습니다.")
                 page.wait_for_timeout(5000)

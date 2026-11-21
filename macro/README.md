@@ -63,7 +63,7 @@ python macro/youtube_batch_upload2.py
 - 업로드 실패 시 업로더가 실패를 반환한 뒤 20초 기다리고 같은 영상을 한 번 재시도해요. 재시도도 실패하면 남은 영상은 처리하지 않아요. 재시도 전에 예약 시각이 지나도 중단해요.
 - 완료 이력은 저장하지 않아요. 수동 재실행 전 YouTube Studio에서 게시 여부를 확인하고 완료된 MP4와 입력 묶음을 함께 제외해 주세요.
 - 업로드 도중 ESC로 일시정지·재개할 수 있어요.
-- 웹에서 게시·예약 버튼을 누른 뒤 최대 10초 동안 완료 화면을 확인해요. 확인하면 바로 다음 영상으로 넘어가요.
+- 웹에서 최종 예약 버튼을 누르면 화면 전환을 확인하고, 반영되지 않으면 좌표 클릭과 Enter 입력을 차례로 시도해요. 게시·예약 요청 후 10초가 지나면 완료 화면을 확인해요.
 
 설정은 `src/constants/global_constants.ts`의 `YOUTUBE_BATCH_CONFIG`에서 관리해요.
 검증 테스트는 `python -B -m unittest discover -s macro -p "test_youtube_batch_upload.py"`로 실행할 수 있어요.
@@ -281,7 +281,7 @@ python auto_bulk_upload2.py --platform youtube
 - 지원하는 동영상·사진이 2개 이상이어야 실행해요. 파일은 이름의 숫자 순서(1, 2, 10)로 연결해요.
 - 입력은 기존 `[TITLE]`, `[CONTENT]`, `[TAGS]`, `[RATIO]`, `[TIME]` 형식을 사용하고 게시물 사이에 `---`만 있는 줄을 넣어요. 파일 수와 게시물 수를 맞춰 주세요.
 - 예약 시각이 비어 있으면 바로 게시해요. 잘못된 시각이나 지난 시각은 업로드 전에 확인하고 멈춰요.
-- 플랫폼별로 파일을 순차 업로드해요. Threads, Instagram, TikTok, 네이버 클립, YouTube는 게시·예약 버튼을 누른 뒤 최대 10초 동안 완료를 확인해요. 완료를 확인하지 못한 항목은 최종 실패 목록에 남겨요. YouTube와 네이버 클립은 사진을 건너뛰고, Facebook은 비활성화되어 있어요.
+- 플랫폼별로 파일을 순차 업로드해요. Threads, Instagram, TikTok, 네이버 클립은 게시·예약 버튼을 누른 뒤 최대 10초 동안 완료를 확인해요. YouTube는 예약 버튼 입력이 반영됐는지 확인한 뒤 10초를 기다리고 완료 화면을 확인해요. 완료를 확인하지 못한 항목은 최종 실패 목록에 남겨요. YouTube와 네이버 클립은 사진을 건너뛰고, Facebook은 비활성화되어 있어요.
 - 업로드에 실패하거나 오류가 생겨도 다음 파일·플랫폼을 계속 처리해요. 마지막에 실패한 플랫폼·파일명·제목·이유를 모아서 보여줘요. Ctrl+D로 건너뛴 항목은 따로 보여줘요. 실패가 있으면 모든 항목을 처리한 뒤 종료 코드 1을 반환해요. 다시 실행하기 전에 실패한 항목의 게시 여부를 확인해 주세요.
 - `--dry-run`은 파일과 게시물 연결만 확인해요. 브라우저를 열거나 게시하지 않아요.
 
@@ -313,4 +313,4 @@ python auto_bulk_upload2.py --platform youtube
 
 일괄 업로드 중 **Ctrl+D**를 누르면 현재 파일의 업로드 프로세스와 브라우저를 종료하고 같은 플랫폼의 다음 파일로 넘어가요. 마지막 파일이면 다음 플랫폼으로 넘어가요. 이미 게시된 내용은 유지돼요. **ESC** 일시정지 중에도 Ctrl+D로 건너뛸 수 있어요. 파일 사이 대기 중에 누른 Ctrl+D는 다음 파일을 건너뛰지 않아요.
 
-개별 업로더와 일괄 업로더의 웹 게시·예약 완료 확인 시간은 `src/constants/global_constants.ts`의 `MACRO_POST_SUBMIT_CONFIG`에서 조절해요.
+Threads, Instagram, TikTok, 네이버 클립의 웹 게시·예약 완료 확인 시간은 `src/constants/global_constants.ts`의 `MACRO_POST_SUBMIT_CONFIG`에서 조절해요. YouTube 일괄 업로드의 대기 시간은 통합 실행의 `AUTO_BULK_UPLOAD_CONFIG`와 YouTube 전용 실행의 `YOUTUBE_BATCH_CONFIG`에 있어요.

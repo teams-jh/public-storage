@@ -10,11 +10,13 @@ def main():
     from config import parse_scheduled_time
     from upload_pause import pause_on_escape
 
-    platform, media, payload = sys.argv[1:]
+    platform, media, completion_wait, post_submit_wait, payload = sys.argv[1:]
     metadata = json.loads(payload)
     metadata["scheduled_at"] = parse_scheduled_time(metadata["time"])
     uploaders = dict(PLATFORM_MAP, x=TwitterXUploader)
-    uploader = uploaders[platform]()
+    uploader = (uploaders[platform](completion_wait_seconds=float(completion_wait),
+                                    post_submit_wait_seconds=float(post_submit_wait))
+                if platform == "youtube" else uploaders[platform]())
     return 0 if pause_on_escape(uploader.upload)(Path(media), metadata) else 1
 
 
