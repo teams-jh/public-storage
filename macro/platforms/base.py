@@ -4,6 +4,8 @@ from pathlib import Path
 import logging
 
 from config import SCREENSHOT_DIR
+from global_constants import POST_SUBMIT_CONFIG
+from upload_pause import upload_monotonic
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,7 +57,7 @@ class BaseUploader(ABC):
                 except Exception:
                     pass
 
-    def save_result_screenshot(self, page, result: str = "success") -> Path | None:
+    def save_result_screenshot(self, page, result: str = "success", *, deadline: float | None = None) -> Path | None:
         """브라우저 업로드 결과 화면을 macro/screenshot 폴더에 저장합니다."""
         try:
             SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -71,8 +73,14 @@ class BaseUploader(ABC):
             screenshot_path = SCREENSHOT_DIR / (
                 f"{safe_platform}_{safe_result}_{timestamp}.png"
             )
-            page.wait_for_timeout(500)
-            page.screenshot(path=str(screenshot_path), full_page=False)
+            if deadline is None:
+                page.wait_for_timeout(500)
+                page.screenshot(path=str(screenshot_path), full_page=False)
+            else:
+                remaining_ms = self.submission_remaining_ms(deadline)
+                if remaining_ms <= 0:
+                    return None
+                page.screenshot(path=str(screenshot_path), full_page=False, timeout=remaining_ms)
             self.logger.info(f"결과 화면 저장 완료: {screenshot_path}")
             return screenshot_path
         except Exception as error:
@@ -106,6 +114,25 @@ class BaseUploader(ABC):
         for elapsed_seconds in range(1, total_seconds + 1):
             page.wait_for_timeout(1000)
             self.log_wait_progress(stage, elapsed_seconds, total_seconds)
+
+    @staticmethod
+    def submission_remaining_ms(deadline: float) -> float:
+        return max(0, (deadline - upload_monotonic()) * 1000)
+
+    def submission_checks(self, page, stage: str):
+        """게시 요청 직후와 제한 시간까지 주기적으로 완료 상태를 확인해요."""
+        timeout_seconds = POST_SUBMIT_CONFIG["timeout_seconds"]
+        poll_interval_ms = POST_SUBMIT_CONFIG["poll_interval_ms"]
+        started_at = upload_monotonic()
+        deadline = started_at + timeout_seconds
+        self.log_wait_progress(stage, 0, timeout_seconds)
+        while True:
+            yield upload_monotonic() - started_at, deadline
+            remaining_ms = self.submission_remaining_ms(deadline)
+            if remaining_ms <= 0:
+                self.log_wait_progress(stage, timeout_seconds, timeout_seconds)
+                return
+            page.wait_for_timeout(min(poll_interval_ms, remaining_ms))
 
     @abstractmethod
     def upload(self, media_path: Path, metadata: dict) -> bool:

@@ -370,14 +370,23 @@ export const MAKE_TOTAL_MERGE_LYRICS_CONFIG = {
 };
 
 /**
+ * Threads, Instagram, TikTok, 네이버 클립, YouTube의 웹 게시·예약 요청 뒤 완료 확인 설정이에요.
+ * timeout_seconds는 확인 제한 시간(초)이며, 줄이면 느린 응답을 완료 미확인으로 기록할 수 있어요.
+ * poll_interval_ms는 화면 확인 간격(ms)이며, 줄이면 완료를 더 빨리 감지하고 화면 검사 횟수가 늘어요.
+ * Python에서도 읽으므로 객체 내부는 주석과 후행 쉼표 없이 JSON 문법을 유지해요.
+ */
+export const MACRO_POST_SUBMIT_CONFIG = {
+  "timeout_seconds": 10,
+  "poll_interval_ms": 1000
+} as const;
+
+/**
  * 유튜브 일괄 업로드의 파일 경로·입력 형식 설정 (단위: 경로/문자열).
  * 경로는 macro 폴더 기준이며, 바꾸면 읽을 입력 파일과 영상 폴더가 바뀌어요.
  * sections는 게시물마다 필요한 태그 순서이고 separator는 게시물 구분선이에요.
  * video_suffix는 업로드 대상 확장자, time_format은 로컬 예약 시각 형식이에요.
  * retry_delay_seconds는 업로드 실패 반환 후 재시도까지 기다리는 시간(단위: 초, 기본 20초)이에요.
- * post_submit_wait_seconds는 게시·예약 버튼을 누른 뒤 서버 처리를 기다리는 시간(단위: 초, 기본 10초)이에요.
- * 파일 크기별 서버 처리 대기를 대체하며, 늘리면 다음 영상 시작이 늦어져요.
- * completion_wait_seconds는 완료 모달 후 추가 대기(단위: 초)이며 0으로 두어 중복 대기를 없애요.
+ * 게시·예약 완료 확인에는 MACRO_POST_SUBMIT_CONFIG를 사용해요.
  * max_retries는 영상당 추가 시도 횟수(단위: 회, 기본 1회)이며, 늘리면 실패 시 시도 횟수가 늘어나요.
  * 대기 시간을 늘리면 재시도가 늦어지고, 횟수를 늘리면 중복 게시 가능성도 커질 수 있어요.
  * second_account는 두 번째 실행 파일의 세션·캡처 경로(단위: macro 기준 경로)와
@@ -393,8 +402,6 @@ export const YOUTUBE_BATCH_CONFIG = {
   "separator": "---",
   "time_format": "%Y-%m-%d %H:%M",
   "retry_delay_seconds": 20,
-  "completion_wait_seconds": 0,
-  "post_submit_wait_seconds": 10,
   "max_retries": 1,
   "second_account": {
     "session_directory": "sessions2",
@@ -416,11 +423,8 @@ export const YOUTUBE_BATCH_CONFIG = {
  * sections는 허용하는 입력 태그와 메타데이터 필드 이름이며 바꾸면 입력 해석이 바뀌어요.
  * platforms는 기본 업로드 순서예요. disabled_platforms는 선택해도 건너뛰는 플랫폼이에요.
  * video_only_platforms는 사진을 건너뛰는 플랫폼이에요. 바꾸면 미디어 전송 대상이 바뀌어요.
- * youtube_post_submit_wait_seconds는 게시·예약 버튼 클릭 후 서버 처리 대기(단위: 초)예요.
- * 10초 뒤 완료 화면을 확인하고 다음 작업으로 넘어가며, 미확인 항목은 실패 목록에 남겨요.
- * 늘리면 서버 처리 확인 시간과 다음 작업까지의 시간이 함께 늘어요.
- * youtube_interval_seconds는 파일 사이 추가 대기, youtube_completion_wait_seconds는
- * 완료 모달 후 추가 대기(단위: 초)예요. 둘 다 0으로 두어 10초 이후 추가 대기를 없애요.
+ * 게시·예약 완료 확인에는 MACRO_POST_SUBMIT_CONFIG를 사용해요.
+ * youtube_interval_seconds는 파일 사이 추가 대기(초)이며, 늘리면 다음 파일 업로드가 늦어져요.
  * Python에서도 읽으므로 객체 내부는 주석과 후행 쉼표 없이 JSON 문법을 유지해요.
  */
 export const AUTO_BULK_UPLOAD_CONFIG = {
@@ -431,9 +435,7 @@ export const AUTO_BULK_UPLOAD_CONFIG = {
   "platforms": ["naver", "instagram", "threads", "tiktok", "youtube"],
   "disabled_platforms": ["facebook"],
   "video_only_platforms": ["youtube", "naver"],
-  "youtube_post_submit_wait_seconds": 10,
   "youtube_interval_seconds": 0,
-  "youtube_completion_wait_seconds": 0,
   "accounts": {
     "first": {"MACRO_INPUT_FILE": "input_bulk1.txt", "MACRO_UPLOAD_DIR": "upload"},
     "second": {

@@ -7,8 +7,8 @@ from platforms.scheduling import (
     get_scheduled_at,
 )
 from config import (
-    CONFIG, DISABLE_AUTO_LOGIN, FORCE_BROWSER_UPLOAD, INSTAGRAM_AI_LABEL_ENABLED, INSTAGRAM_SCHEDULE_MAX_DAYS, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
-    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb
+    CONFIG, DISABLE_AUTO_LOGIN, FORCE_BROWSER_UPLOAD, INSTAGRAM_AI_LABEL_ENABLED, INSTAGRAM_SCHEDULE_MAX_DAYS, SESSION_DIR, get_media_type, LOGIN_TIMEOUT_SECONDS,
+    get_media_size_mb,
 )
 
 class InstagramUploader(BaseUploader):
@@ -535,10 +535,7 @@ class InstagramUploader(BaseUploader):
 
             media_type = get_media_type(media_path)
             size_mb = get_media_size_mb(media_path)
-            upload_timeout = get_dynamic_upload_timeout(media_path)
-            sync_buffer = get_dynamic_sync_buffer(media_path)
-
-            self.logger.info(f"Playwright 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 세션 유지: {sync_buffer}초, 설정 비율: {target_ratio})")
+            self.logger.info(f"Instagram 브라우저를 열어요. (파일 크기: {size_mb:.2f}MB, 화면 비율: {target_ratio})")
             with sync_playwright() as p:
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
@@ -901,18 +898,9 @@ class InstagramUploader(BaseUploader):
                     if not self._click_final_post_action(page, scheduled=bool(scheduled_at)):
                         browser.close()
                         return False
-                    page.wait_for_timeout(1500)
 
                     # 5. 실제 업로드 완료 엄격 검증 (오직 업로드 모달 내부에서 확인)
-                    upload_success = False
-                    self.logger.info(f"모달 내부에서 실제 업로드 완료 화면을 대기합니다 (최대 {upload_timeout}초 = {upload_timeout // 60}분)...")
-                    
-                    for wait_i in range(upload_timeout):
-                        self.log_wait_progress(
-                            "Instagram 업로드 완료 확인", wait_i, upload_timeout
-                        )
-                        page.wait_for_timeout(1000)
-                        
+                    for _, deadline in self.submission_checks(page, "Instagram 업로드 완료 확인"):
                         # 업로드 모달(div[role='dialog']) 내부의 텍스트만 엄격하게 검사
                         is_completed = False
                         try:
@@ -950,30 +938,17 @@ class InstagramUploader(BaseUploader):
                             pass
 
                         if is_completed:
-                            upload_success = True
-                            self.logger.info("🎉 Instagram 모달 완료 화면 감지: 게시물이 성공적으로 공유되었습니다!")
-                            break
+                            result_name = "예약 등록" if scheduled_at else "공유"
+                            self.logger.info(f"Instagram {result_name} 완료를 확인했어요.")
+                            self.save_result_screenshot(
+                                page, "scheduled" if scheduled_at else "uploaded", deadline=deadline
+                            )
+                            browser.close()
+                            return True
 
-                        # 버튼 클릭이 반영되지 않은 경우에만 동일한 최종 액션을 한 번 더 시도
-                        if wait_i == 8 or wait_i == 20:
-                            self.logger.info(f"{action_name} 버튼 재클릭 시도...")
-                            self._click_final_post_action(page, scheduled=bool(scheduled_at))
-
-                    if upload_success:
-                        self.wait_with_countdown(
-                            page, sync_buffer, "Instagram 업로드 세션 안전 동기화"
-                        )
-                        self.logger.info("🎉 Instagram 업로드 최종 성공 완료!")
-                        self.save_result_screenshot(
-                            page, "scheduled" if scheduled_at else "uploaded"
-                        )
-                        browser.close()
-                        return True
-                    else:
-                        self.logger.error("Instagram 서버 전송 시간이 초과되었거나 완료 화면을 감지하지 못했습니다.")
-                        page.wait_for_timeout(5000)
-                        browser.close()
-                        return False
+                    self.logger.warning("Instagram 업로드 완료를 확인하지 못했어요. 다시 올리기 전에 게시물을 확인해 주세요.")
+                    browser.close()
+                    return False
 
 
 

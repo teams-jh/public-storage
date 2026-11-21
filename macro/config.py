@@ -35,10 +35,6 @@ UPLOAD_TIMEOUT_SECONDS = 180
 # 로그인 및 2단계 인증 대기 최대 시간 (초 단위: 180초 = 3분)
 LOGIN_TIMEOUT_SECONDS = 180
 
-# Threads 업로드 완료 후 세션 유지 시간을 공통 대기시간의 1/5로 줄입니다.
-# 단위는 배수이며, 값을 높이면 Threads 브라우저가 더 빨리 닫힙니다.
-THREADS_SYNC_BUFFER_DIVISOR = 5
-
 # Threads 미디어 렌더링 대기 중 Enter 입력을 확인하는 간격입니다. 단위는 ms입니다.
 # 값을 줄이면 입력 반응은 빨라지지만 브라우저와 터미널 검사 횟수가 늘어납니다.
 THREADS_RENDER_SKIP_POLL_MS = 200
@@ -94,13 +90,6 @@ NAVER_CLIP_POLL_INTERVAL_MS = 1000
 # 네이버 클립의 주요 화면 조작을 눈으로 확인하도록 멈추는 시간입니다. 단위는 ms입니다.
 # 값을 늘리면 각 단계가 더 천천히 진행되고 전체 업로드 시간도 길어집니다.
 NAVER_CLIP_STEP_DELAY_MS = 3000
-
-# 네이버 클립의 '등록 완료' 팝업을 확인하기 전에 기다리는 시간입니다. 단위는 ms입니다.
-# 값을 늘리면 사용자가 완료 화면을 더 오래 확인할 수 있고 브라우저 종료도 늦어집니다.
-NAVER_CLIP_CONFIRM_DELAY_MS = 10000
-
-# 네이버 클립 결과 화면의 텍스트를 읽는 대기 시간입니다. 단위는 ms이며, 줄이면 느린 화면에서 실패할 수 있습니다.
-NAVER_CLIP_BODY_READ_TIMEOUT_MS = 5000
 
 # 업로드 중 ESC 단축키가 눌렸을 때의 Windows 가상 키 코드입니다. 단위는 Win32 키 코드이며,
 # 값을 바꾸면 일시정지·재개에 사용하는 키가 바뀝니다.

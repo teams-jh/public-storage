@@ -19,8 +19,6 @@ from config import (
     NAVER_CLIP_NAVIGATION_TIMEOUT_SECONDS,
     NAVER_CLIP_POLL_INTERVAL_MS,
     NAVER_CLIP_STEP_DELAY_MS,
-    NAVER_CLIP_CONFIRM_DELAY_MS,
-    NAVER_CLIP_BODY_READ_TIMEOUT_MS,
     SESSION_DIR,
     VIDEO_EXTENSIONS,
     get_dynamic_upload_timeout,
@@ -597,26 +595,25 @@ class NaverClipUploader(BaseUploader):
         # 예약이면 '등록' 버튼이어도 예약 설정이 확인된 뒤에만 누릅니다.
         self._pause(page, "등록 전 입력 내용 확인")
         button.click()
-        self.logger.info("등록 버튼을 눌렀어요. 완료 화면을 기다려요.")
-
-        deadline = upload_monotonic() + timeout_seconds
-        while upload_monotonic() < deadline:
+        for _, deadline in self.submission_checks(page, "네이버 클립 등록 완료 확인"):
             completion_title = self._visible(page.get_by_text("등록 완료", exact=True))
             if completion_title is not None:
                 confirm = self._visible(page.get_by_role("button", name="확인", exact=True))
-                if confirm is not None and confirm.is_enabled():
-                    self.logger.info("네이버 클립 등록 완료 화면을 10초 동안 보여줘요.")
-                    page.wait_for_timeout(NAVER_CLIP_CONFIRM_DELAY_MS)
-                    if not completion_title.is_visible():
-                        self.logger.error("확인 버튼을 누르기 전에 등록 완료 화면이 닫혔어요.")
-                        return False
-                    confirm.click()
-                    self.logger.info("등록 완료 화면에서 [확인]을 눌렀어요. 브라우저를 종료해요.")
+                if confirm is not None:
+                    remaining_ms = self.submission_remaining_ms(deadline)
+                    if remaining_ms > 0:
+                        try:
+                            confirm.click(timeout=remaining_ms)
+                        except PlaywrightTimeoutError:
+                            self.logger.warning("등록 완료 화면에서 확인 버튼을 누르지 못했어요.")
+                    self.logger.info("네이버 클립 등록 완료를 확인했어요.")
+                    self.save_result_screenshot(
+                        page, "scheduled" if scheduled_at else "uploaded", deadline=deadline
+                    )
                     return True
-            visible_text = page.locator("body").inner_text(timeout=NAVER_CLIP_BODY_READ_TIMEOUT_MS)
+            visible_text = page.evaluate("() => document.body?.innerText ?? ''")
             if any(message in visible_text for message in ("업로드 실패", "인코딩에 실패", "등록에 실패")):
                 break
-            page.wait_for_timeout(NAVER_CLIP_POLL_INTERVAL_MS)
         self.logger.error("네이버 클립 등록 완료를 확인하지 못했어요. 콘텐츠 목록을 확인해 주세요.")
         return False
 
@@ -700,10 +697,7 @@ class NaverClipUploader(BaseUploader):
                     if scheduled_at and not self._set_schedule(page, scheduled_at):
                         self.save_result_screenshot(page, "schedule_failed")
                         return False
-                    success = self._submit(page, scheduled_at, timeout_seconds)
-                    if success:
-                        self.save_result_screenshot(page, "scheduled" if scheduled_at else "uploaded")
-                    return success
+                    return self._submit(page, scheduled_at, timeout_seconds)
                 finally:
                     browser.close()
         except Exception as error:

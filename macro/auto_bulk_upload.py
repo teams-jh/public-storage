@@ -2,22 +2,18 @@
 
 import argparse
 from datetime import datetime
-import json
 import os
 from pathlib import Path
 import re
 import sys
 import time
 
+from global_constants import load_macro_settings
 from youtube_batch_upload import natural_sort_key
 
 
 def load_settings() -> dict:
-    source = (Path(__file__).resolve().parents[1] / "src/constants/global_constants.ts").read_text(encoding="utf-8-sig")
-    match = re.search(r"export const AUTO_BULK_UPLOAD_CONFIG\s*=\s*(\{.*?\})\s*as const;", source, re.DOTALL)
-    if not match:
-        raise ValueError("전역 상수에서 일괄 업로드 설정을 찾지 못했어요.")
-    return json.loads(match.group(1))
+    return load_macro_settings("AUTO_BULK_UPLOAD_CONFIG")
 
 
 def configure_account(account: str, settings: dict) -> tuple[Path, Path]:
@@ -86,9 +82,7 @@ def upload_plan(plan: list, selected: list, uploaders: dict, settings: dict, run
                     raise ValueError("예약 시각이 지났어요. [TIME]을 수정해 주세요.")
                 print(f"[{platform} {index}/{len(targets)}] {path.name} 업로드를 시작해요.")
                 if runner is None and uploader is None:
-                    uploader = (uploaders[platform](completion_wait_seconds=settings["youtube_completion_wait_seconds"],
-                                                    post_submit_wait_seconds=settings["youtube_post_submit_wait_seconds"])
-                                if platform == "youtube" else uploaders[platform]())
+                    uploader = uploaders[platform]()
                 result = (runner(platform, path, metadata.copy()) if runner is not None
                           else uploader.upload(path, metadata.copy()))
                 if result is None:

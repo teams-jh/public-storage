@@ -1,4 +1,4 @@
-"""게시물 연결, 계정 격리, 업로드 중단과 유튜브 대기를 검증해요."""
+"""게시물 연결, 계정 격리, 업로드 중단과 업로더 연결을 검증해요."""
 
 from contextlib import redirect_stdout
 import io
@@ -61,13 +61,13 @@ class BulkUploadTests(unittest.TestCase):
                 self.prepare(text=f"[TITLE]\none\n[TIME]\n{value}\n---\n[TITLE]\ntwo")
 
     @patch.object(bulk.time, "sleep")
-    def test_youtube_interval_and_internal_wait(self, sleep):
+    def test_youtube_uses_shared_uploader_without_an_extra_interval(self, sleep):
         plan = self.prepare()
         uploader = Mock()
         uploader.upload.return_value = True
         factory = Mock(return_value=uploader)
         self.assertTrue(bulk.upload_plan(plan, ["youtube"], {"youtube": factory}, self.settings))
-        factory.assert_called_once_with(completion_wait_seconds=0, post_submit_wait_seconds=10)
+        factory.assert_called_once_with()
         self.assertEqual(uploader.upload.call_count, 2)
         sleep.assert_not_called()
 

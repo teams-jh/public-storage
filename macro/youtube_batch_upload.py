@@ -2,27 +2,16 @@
 
 import argparse
 from datetime import datetime
-import json
 from pathlib import Path
 import re
 import sys
 import time
 
+from global_constants import POST_SUBMIT_CONFIG, load_macro_settings
+
 
 def load_settings() -> dict:
-    """설정은 저장소의 전역 상수에서만 읽어요."""
-    source = (
-        Path(__file__).resolve().parents[1]
-        / "src" / "constants" / "global_constants.ts"
-    ).read_text(encoding="utf-8-sig")
-    match = re.search(
-        r"export const YOUTUBE_BATCH_CONFIG\s*=\s*(\{.*?\})\s*as const;",
-        source,
-        re.DOTALL,
-    )
-    if not match:
-        raise ValueError("global_constants.ts에서 유튜브 일괄 업로드 설정을 찾지 못했어요.")
-    return json.loads(match.group(1))
+    return load_macro_settings("YOUTUBE_BATCH_CONFIG")
 
 
 def natural_sort_key(path: Path) -> tuple:
@@ -139,7 +128,8 @@ def upload_plan(plan: list, uploader, settings=None) -> bool:
                 time.sleep(delay)
         if not success and getattr(uploader, "submission_unconfirmed", False) is True:
             unconfirmed.append((video, metadata["title"]))
-            print(f"{video.name}은 {settings['post_submit_wait_seconds']}초 뒤에도 완료를 확인하지 못했어요. 다음 영상으로 넘어가요.")
+            wait_seconds = POST_SUBMIT_CONFIG["timeout_seconds"]
+            print(f"{video.name}은 최대 {wait_seconds}초 동안 완료를 확인하지 못했어요. 다음 영상으로 넘어가요.")
             continue
         if not success:
             print(
@@ -184,10 +174,7 @@ def main(argv=None) -> int:
     from platforms.youtube import YouTubeUploader
     from upload_pause import pause_on_escape
 
-    uploader = YouTubeUploader(
-        completion_wait_seconds=settings["completion_wait_seconds"],
-        post_submit_wait_seconds=settings["post_submit_wait_seconds"],
-    )
+    uploader = YouTubeUploader()
     return 0 if pause_on_escape(upload_plan)(plan, uploader, settings) else 1
 
 

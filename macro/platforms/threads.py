@@ -1,4 +1,3 @@
-import math
 import os
 from pathlib import Path
 import requests
@@ -8,9 +7,8 @@ from platforms.scheduling import (
     get_scheduled_at,
 )
 from config import (
-    CONFIG, FORCE_BROWSER_UPLOAD, SESSION_DIR, get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
-    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb,
-    THREADS_SYNC_BUFFER_DIVISOR, THREADS_RENDER_SKIP_POLL_MS,
+    CONFIG, FORCE_BROWSER_UPLOAD, SESSION_DIR, get_media_type, LOGIN_TIMEOUT_SECONDS,
+    get_media_size_mb, THREADS_RENDER_SKIP_POLL_MS,
 )
 
 class ThreadsUploader(BaseUploader):
@@ -256,7 +254,6 @@ class ThreadsUploader(BaseUploader):
         if point is not None:
             try:
                 page.mouse.click(point["x"], point["y"])
-                page.wait_for_timeout(500)
                 return True
             except Exception:
                 pass
@@ -803,12 +800,7 @@ class ThreadsUploader(BaseUploader):
 
             media_type = get_media_type(media_path)
             size_mb = get_media_size_mb(media_path)
-            upload_timeout = get_dynamic_upload_timeout(media_path)
-            sync_buffer = math.ceil(
-                get_dynamic_sync_buffer(media_path) / THREADS_SYNC_BUFFER_DIVISOR
-            )
-
-            self.logger.info(f"Threads 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 완료 후 세션유지: {sync_buffer}초)")
+            self.logger.info(f"Threads 브라우저를 열어요. (파일 크기: {size_mb:.2f}MB)")
             with sync_playwright() as p:
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
@@ -1003,17 +995,7 @@ class ThreadsUploader(BaseUploader):
                     browser.close()
                     return False
 
-                self.logger.info(f"게시 요청 전송 완료. 서버 처리 및 완료 대기 중 (최대 {upload_timeout}초)...")
-                page.wait_for_timeout(3000)
-                
-                # 게시 완료 상태 확인 (최대 upload_timeout초)
-                post_done = False
-                for wait_i in range(upload_timeout):
-                    self.log_wait_progress(
-                        "Threads 게시 완료 확인", wait_i, upload_timeout
-                    )
-                    page.wait_for_timeout(1000)
-                    
+                for elapsed_seconds, deadline in self.submission_checks(page, "Threads 게시 완료 확인"):
                     # 1) '게시되었습니다' 토스트 확인
                     toast = page.locator(
                         "div:has-text('게시되었습니다'), div:has-text('Posted'), span:has-text('게시되었습니다'), "
@@ -1045,32 +1027,18 @@ class ThreadsUploader(BaseUploader):
                     dialog = page.locator("div[role='dialog'], div[aria-label*='새로운 스레드']")
                     modal_closed = (dialog.count() == 0)
 
-                    if has_toast:
-                        self.logger.info("🎉 Threads '게시되었습니다' 토스트 확인!")
-                        post_done = True
-                        break
-                    elif modal_closed and not is_posting and wait_i >= 5:
-                        self.logger.info("🎉 Threads 작성 모달 닫힘 확인!")
-                        post_done = True
-                        break
+                    if has_toast or (modal_closed and not is_posting and elapsed_seconds >= 5):
+                        result_name = "예약 등록" if scheduled_at else "게시"
+                        self.logger.info(f"Threads {result_name} 완료를 확인했어요.")
+                        self.save_result_screenshot(
+                            page, "scheduled" if scheduled_at else "uploaded", deadline=deadline
+                        )
+                        browser.close()
+                        return True
 
-                if post_done:
-                    # Threads 전용 단축 세션 유지 후 정상 종료 (사진 4초, 동영상 약 6~36초)
-                    self.wait_with_countdown(
-                        page, sync_buffer, "Threads 업로드 세션 안전 동기화"
-                    )
-                    result_name = "예약 등록" if scheduled_at else "업로드"
-                    self.logger.info(f"🎉 Threads 최종 {result_name} 완료!")
-                    self.save_result_screenshot(
-                        page, "scheduled" if scheduled_at else "uploaded"
-                    )
-                    browser.close()
-                    return True
-                else:
-                    self.logger.warning("Threads 서버 전송 완료 확인을 받지 못했습니다.")
-                    page.wait_for_timeout(5000)
-                    browser.close()
-                    return False
+                self.logger.warning("Threads 게시 완료를 확인하지 못했어요. 다시 올리기 전에 게시물을 확인해 주세요.")
+                browser.close()
+                return False
 
 
 

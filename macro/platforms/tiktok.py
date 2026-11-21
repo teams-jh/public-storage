@@ -10,8 +10,8 @@ from platforms.scheduling import (
 )
 from config import (
     CONFIG, SESSION_DIR, TIKTOK_SCHEDULE_MAX_DAYS, TIKTOK_SCHEDULE_MIN_MINUTES,
-    get_media_type, UPLOAD_TIMEOUT_SECONDS, LOGIN_TIMEOUT_SECONDS,
-    get_dynamic_upload_timeout, get_dynamic_sync_buffer, get_media_size_mb,
+    get_media_type, LOGIN_TIMEOUT_SECONDS,
+    get_dynamic_upload_timeout, get_media_size_mb,
     UPLOAD_FAILURE_BROWSER_HOLD_SECONDS,
 )
 
@@ -662,7 +662,7 @@ class TikTokUploader(BaseUploader):
         time.sleep(UPLOAD_FAILURE_BROWSER_HOLD_SECONDS)
         return False
 
-    def _handle_tiktok_post_now_popup(self, page) -> bool:
+    def _handle_tiktok_post_now_popup(self, page, deadline: float) -> bool:
         """
         '계속 게시할까요?' 팝업 감지 시 [지금 게시] 버튼을 클릭해요.
         (콘텐츠 검사 라이트 / 잠재적 문제에 대한 검사 진행 중 팝업 대응)
@@ -670,6 +670,8 @@ class TikTokUploader(BaseUploader):
         surfaces = [page, *page.frames]
 
         for surface in surfaces:
+            if self.submission_remaining_ms(deadline) <= 0:
+                return False
             # 1. Playwright 선택자로 [지금 게시] 버튼 탐색 및 클릭
             selectors = [
                 "button:text-is('지금 게시')",
@@ -688,14 +690,18 @@ class TikTokUploader(BaseUploader):
                     for i in range(btns.count()):
                         btn = btns.nth(i)
                         if btn.is_visible():
-                            btn.click(force=True)
+                            remaining_ms = self.submission_remaining_ms(deadline)
+                            if remaining_ms <= 0:
+                                return False
+                            btn.click(force=True, timeout=remaining_ms)
                             self.logger.info("⚠️ TikTok '계속 게시할까요?' 팝업 감지 -> [지금 게시] 버튼 클릭 완료! (Playwright)")
-                            surface.wait_for_timeout(1000)
                             return True
                 except Exception:
                     pass
 
             # 2. JavaScript DOM 탐색 및 강제 클릭
+            if self.submission_remaining_ms(deadline) <= 0:
+                return False
             try:
                 clicked = surface.evaluate(r"""() => {
                     const visible = el => {
@@ -757,7 +763,6 @@ class TikTokUploader(BaseUploader):
                 }""")
                 if clicked:
                     self.logger.info("⚠️ TikTok '계속 게시할까요?' 팝업 감지 -> [지금 게시] 버튼 클릭 완료! (DOM JS)")
-                    surface.wait_for_timeout(1000)
                     return True
             except Exception:
                 pass
@@ -857,9 +862,8 @@ class TikTokUploader(BaseUploader):
             media_type = get_media_type(media_path)
             size_mb = get_media_size_mb(media_path)
             upload_timeout = get_dynamic_upload_timeout(media_path)
-            sync_buffer = get_dynamic_sync_buffer(media_path)
 
-            self.logger.info(f"TikTok 업로드 브라우저를 실행합니다... (파일 크기: {size_mb:.2f}MB, 동적 대기: {upload_timeout}초, 세션 유지: {sync_buffer}초)")
+            self.logger.info(f"TikTok 브라우저를 열어요. (파일 크기: {size_mb:.2f}MB, 미디어 처리 대기 최대 {upload_timeout}초)")
             with sync_playwright() as p:
                 browser = p.chromium.launch_persistent_context(
                     user_data_dir=str(user_data_dir),
@@ -1198,32 +1202,16 @@ class TikTokUploader(BaseUploader):
                             pass
                         page.wait_for_timeout(1000)
 
-                    action_name = "예약" if scheduled_at else "게시"
                     post_btn.click(force=True)
-                    self.logger.info(f"{action_name} 버튼을 클릭했어요. 서버 처리 및 완료 대기 중 (최대 {upload_timeout}초)...")
-
-                    # 버튼 클릭 직후 '계속 게시할까요?' 팝업 감지 (최대 5초간 1초 단위 확인)
-                    for _ in range(5):
-                        page.wait_for_timeout(1000)
-                        if self._handle_tiktok_post_now_popup(page):
-                            break
-
-                    # 게시 완료 상태 확인 대기 (최대 upload_timeout초)
-                    post_completed = False
-                    for wait_i in range(upload_timeout):
-                        self.log_wait_progress(
-                            "TikTok 게시 완료 확인", wait_i, upload_timeout
-                        )
-                        page.wait_for_timeout(1000)
-
+                    for elapsed_seconds, deadline in self.submission_checks(page, "TikTok 게시 완료 확인"):
                         # 1) '계속 게시할까요?' / '콘텐츠 검사 라이트' 팝업 감지 시 [지금 게시] 자동 클릭
-                        self._handle_tiktok_post_now_popup(page)
+                        if self._handle_tiktok_post_now_popup(page, deadline):
+                            continue
 
                         # 2) URL 리다이렉트 감지 (콘텐츠 관리 페이지 /tiktokstudio/content 또는 /creator-center/content 등으로 이동)
                         current_url = page.url
                         if any(path in current_url for path in ["/content", "/manage", "/tiktokstudio/content", "/creator-center/content", "/creator-center/manage"]):
                             self.logger.info(f"🎉 TikTok 콘텐츠 관리 페이지 URL 전환 감지 완료! ({current_url})")
-                            post_completed = True
                             break
 
                         # 3) 콘텐츠 관리 화면 또는 게시 완료 화면 DOM 텍스트 감지
@@ -1258,10 +1246,9 @@ class TikTokUploader(BaseUploader):
                         except Exception:
                             pass
 
-                        if is_done_by_dom and wait_i >= 2:
+                        if is_done_by_dom and elapsed_seconds >= 2:
                             result_name = "예약 등록" if scheduled_at else "게시"
                             self.logger.info(f"🎉 TikTok {result_name} 완료 및 콘텐츠 관리 화면 감지 완료!")
-                            post_completed = True
                             break
 
                         # 4) 완료 확인 선택자 탐색
@@ -1273,26 +1260,19 @@ class TikTokUploader(BaseUploader):
                             "button:has-text('게시물 관리'), a:has-text('게시물 관리'), "
                             "a[href*='/content'], a[href*='/tiktokstudio/content']"
                         )
-                        if success_indicators.count() > 0 and success_indicators.first.is_visible() and wait_i >= 2:
+                        if elapsed_seconds >= 2 and success_indicators.count() > 0 and success_indicators.first.is_visible():
                             self.logger.info("🎉 TikTok 게시 완료 요소 감지 확인!")
-                            post_completed = True
                             break
-
-                    if post_completed:
-                        self.wait_with_countdown(
-                            page, sync_buffer, "TikTok 업로드 세션 안전 동기화"
-                        )
-                        self.logger.info("🎉 TikTok 최종 업로드 성공 완료!")
-                        self.save_result_screenshot(
-                            page, "scheduled" if scheduled_at else "uploaded"
-                        )
-                        browser.close()
-                        return True
                     else:
-                        self.logger.warning("TikTok 서버 전송 완료 확인을 받지 못했어요.")
-                        self._pause_on_issue("TikTok 서버 전송 완료 확인을 받지 못했어요.")
+                        self.logger.warning("TikTok 게시 완료를 확인하지 못했어요. 다시 올리기 전에 게시물을 확인해 주세요.")
                         browser.close()
                         return False
+
+                    self.save_result_screenshot(
+                        page, "scheduled" if scheduled_at else "uploaded", deadline=deadline
+                    )
+                    browser.close()
+                    return True
 
                 self.logger.error("게시 버튼을 찾지 못했어요.")
                 self._pause_on_issue("게시 버튼을 찾지 못했어요.")
