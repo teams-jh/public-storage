@@ -169,6 +169,7 @@ macro/upload/*
 
 # Generated music videos and intermediate results
 /macro/make_mp4/result/
+/macro/cutter/result/
 
 /macro/make_mp4/k_pop/
 /macro/make_mp4/eng_pop/

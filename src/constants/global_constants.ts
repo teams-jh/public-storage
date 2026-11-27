@@ -166,6 +166,52 @@ export const MAKE_K_POP_VIDEO_FPS = 30;
 export const MAKE_MP4_AUDIO_BITRATE_KBPS = 192;
 
 /**
+ * make_cutter.py에서 쓸 대사 감지와 MP4 저장 설정이에요.
+ * - input_folder, output_folder: 스크립트 기준 입력·출력 폴더 이름이에요. 바꾸면 영상을 찾거나 저장하는 위치가 달라져요.
+ * - sample_rate_hz: 음성 분석의 초당 샘플 수(Hz)예요. Silero VAD와 Whisper가 사용하는 16kHz에 맞춰요.
+ * - scan_seconds, scan_context_seconds: 한 번에 분석할 길이(초)와 앞뒤에서 이어 붙일 길이(초)예요. 늘리면 분석 경계에 필요한 문맥이나 메모리 사용량이 늘어요.
+ * - detection_pause_ms: 음성 감지에서 대사 끝으로 볼 최소 쉼(ms)이에요. 높이면 아주 짧은 쉼이 대사에 더 많이 포함돼요.
+ * - pause_ms: 대사를 별도 구간으로 나누는 최소 쉼(ms)이에요. 높이면 짧은 쉼을 더 많이 합쳐요.
+ * - speech_padding_ms: 대사 시작과 끝에 남길 여유(ms)예요. 높이면 대사 주변 소리가 더 길게 남아요.
+ * - minimum_edge_seconds: 영상의 맨 앞뒤에서 따로 저장할 최소 길이(초)예요. 높이면 시작과 끝의 짧은 구간이 인접 장면에 더 많이 포함돼요.
+ * - video_crf: H.264 품질 값(0~51)이에요. 낮추면 화질과 파일 크기가 올라가요.
+ * - encoder_preset: H.264 인코딩 속도 설정 이름이에요. 빠를수록 같은 품질에서 파일 크기가 커질 수 있어요.
+ * - audio_bitrate_kbps: AAC 오디오 트랙 하나의 비트레이트(kbps)예요. 높이면 음질과 파일 크기가 올라가요.
+ * - number_width: 장면 번호를 채울 최소 자릿수예요. 늘리면 파일명 앞의 0이 많아져요.
+ * - subtitle_order: 원본 언어별 SRT의 두 줄 순서예요. 키는 Whisper 언어 코드며, 바꾸면 자동 감지와 명령줄에서 선택할 수 있는 언어가 달라져요.
+ * - audio_language_tags: MP4 오디오에 기록된 언어를 Whisper 언어 코드로 바꿔요. 추가하면 더 많은 언어 표기를 바로 알아볼 수 있어요.
+ * - language_sample_seconds: 언어 정보가 없는 영상에서 언어 감지에 쓸 대사의 최대 길이(초)예요. 늘리면 언어 감지에 쓰는 오디오가 길어져요.
+ * - whisper_model, whisper_device, whisper_compute_type: 자막에 사용할 모델 이름, 실행 장치, 연산 형식이에요. 큰 모델은 처리 시간과 메모리가 더 필요해요.
+ * - translation_model, translation_tags: 로컬 NLLB 번역 모델과 언어 코드예요. 바꾸면 번역 품질이나 번역에 사용하는 언어가 달라져요.
+ * - translation_batch_size, translation_max_new_tokens: 한 번에 번역할 자막 개수와 자막당 최대 생성 토큰 수예요. 높이면 메모리와 처리 시간이 늘어날 수 있어요.
+ */
+export const MAKE_CUTTER_CONFIG = {
+  "input_folder": "example",
+  "output_folder": "result",
+  "sample_rate_hz": 16000,
+  "scan_seconds": 60,
+  "scan_context_seconds": 3,
+  "detection_pause_ms": 250,
+  "pause_ms": 2000,
+  "speech_padding_ms": 250,
+  "minimum_edge_seconds": 0.25,
+  "video_crf": 18,
+  "encoder_preset": "veryfast",
+  "audio_bitrate_kbps": 192,
+  "number_width": 4,
+  "subtitle_order": {"ko": ["ko", "en"], "en": ["en", "ko"], "ja": ["ko", "ja"]},
+  "audio_language_tags": {"kor": "ko", "eng": "en", "jpn": "ja"},
+  "language_sample_seconds": 30,
+  "whisper_model": "small",
+  "whisper_device": "cpu",
+  "whisper_compute_type": "int8",
+  "translation_model": "facebook/nllb-200-distilled-600M",
+  "translation_tags": {"ko": "kor_Hang", "en": "eng_Latn", "ja": "jpn_Jpan"},
+  "translation_batch_size": 8,
+  "translation_max_new_tokens": 192
+} as const;
+
+/**
  * 합치기 영상에서 --merge의 반복 횟수를 생략했을 때 적용하는 최소 재생 시간(초).
  * 하위 폴더의 곡 묶음을 통째로 반복해 이 시간 이상을 채워요.
  * 값을 높이면 필요한 반복 횟수와 인코딩 시간, 파일 크기가 늘어날 수 있어요.
@@ -371,12 +417,14 @@ export const MAKE_TOTAL_MERGE_LYRICS_CONFIG = {
 
 /**
  * Threads, Instagram, TikTok, 네이버 클립의 웹 게시·예약 요청 뒤 완료 확인 설정이에요.
- * timeout_seconds는 확인 제한 시간(초)이며, 줄이면 느린 응답을 완료 미확인으로 기록할 수 있어요.
+ * timeout_seconds는 기본 확인 제한 시간(초), platform_timeout_seconds는 플랫폼별 확인 제한 시간(초)이에요.
+ * 값을 늘리면 느린 완료 화면도 더 오래 확인하고, 다음 작업을 시작하기까지 더 오래 걸릴 수 있어요.
  * poll_interval_ms는 화면 확인 간격(ms)이며, 줄이면 완료를 더 빨리 감지하고 화면 검사 횟수가 늘어요.
  * Python에서도 읽으므로 객체 내부는 주석과 후행 쉼표 없이 JSON 문법을 유지해요.
  */
 export const MACRO_POST_SUBMIT_CONFIG = {
   "timeout_seconds": 10,
+  "platform_timeout_seconds": {"Instagram": 45, "Threads": 30},
   "poll_interval_ms": 1000
 } as const;
 

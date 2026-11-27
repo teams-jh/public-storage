@@ -121,7 +121,9 @@ class BaseUploader(ABC):
 
     def submission_checks(self, page, stage: str):
         """게시 요청 직후와 제한 시간까지 주기적으로 완료 상태를 확인해요."""
-        timeout_seconds = POST_SUBMIT_CONFIG["timeout_seconds"]
+        timeout_seconds = POST_SUBMIT_CONFIG["platform_timeout_seconds"].get(
+            self.platform_name, POST_SUBMIT_CONFIG["timeout_seconds"]
+        )
         poll_interval_ms = POST_SUBMIT_CONFIG["poll_interval_ms"]
         started_at = upload_monotonic()
         deadline = started_at + timeout_seconds

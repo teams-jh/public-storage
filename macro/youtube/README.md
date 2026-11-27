@@ -44,6 +44,12 @@ pip install -r requirements.txt
 3. `link.txt`의 링크들이 감지되면 `Enter` 키를 눌러 바로 일괄 다운로드를 진행합니다.
 4. 다운로드가 완료되면 `link.txt` 파일 내 완료된 항목 앞에 `# [완료]`가 자동으로 표시됩니다.
 
+완료 표시가 붙은 링크도 다시 받으려면 `--retry`를 붙여 실행해 주세요. 같은 이름의 파일은 새 파일로 덮어써요.
+
+```bash
+python download_mp3.py --retry
+```
+
 ---
 
 ### 2. 대화형 모드에서 직접 링크 입력
@@ -92,4 +98,4 @@ python download_mp3.py --option mp4_only
 python download_mp3.py --option mp4_only "https://www.youtube.com/watch?v=..."
 ```
 
-MP4 다운로드 기록은 MP3 기록과 따로 저장해요. `link.txt`에서 이미 완료 표시된 링크를 다른 형식으로 받으려면 URL을 직접 전달하거나 완료 표시를 지워주세요.
+MP4 다운로드 기록은 MP3 기록과 따로 저장해요. `link.txt`에서 완료 표시가 붙은 링크를 MP4로 받으려면 `python download_mp3.py --retry --option mp4_only`를 실행해 주세요.

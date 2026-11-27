@@ -75,10 +75,8 @@ def video_progress_hook(d: dict):
         progress_hook(d)
 
 
-def load_links_from_file(file_path: Path) -> List[str]:
-    """
-    파일에서 주석(#, //)과 빈 줄을 제외한 유효한 YouTube URL 목록을 읽어옵니다.
-    """
+def load_links_from_file(file_path: Path, *, retry: bool = False) -> List[str]:
+    """파일의 URL을 읽어요. 재시도할 때는 완료 표시가 붙은 URL도 읽어요."""
     if not file_path.exists():
         return []
 
@@ -87,9 +85,8 @@ def load_links_from_file(file_path: Path) -> List[str]:
         with open(file_path, "r", encoding="utf-8") as f:
             for line in f:
                 stripped = line.strip()
-                if not stripped or stripped.startswith("#") or stripped.startswith("//"):
-                    continue
-                # http 또는 https 로 시작하는 링크만 추가
+                if retry:
+                    stripped = stripped.removeprefix("# [완료]").lstrip()
                 if stripped.startswith("http://") or stripped.startswith("https://"):
                     links.append(stripped)
     except Exception as e:
@@ -132,16 +129,18 @@ def download_youtube_to_mp3(
     quality: str = "192",
     allow_playlist: bool = False,
     option: Optional[str] = None,
+    *,
+    retry: bool = False,
 ) -> bool:
     """
     단일 YouTube URL을 받아 MP3 파일로 변환 및 다운로드합니다.
     """
     if option == "mp4":
         video_success = download_youtube_to_mp3(
-            url, output_dir, quality, allow_playlist, option="mp4_only"
+            url, output_dir, quality, allow_playlist, option="mp4_only", retry=retry
         )
         audio_success = download_youtube_to_mp3(
-            url, output_dir, quality, allow_playlist
+            url, output_dir, quality, allow_playlist, retry=retry
         )
         return video_success and audio_success
 
@@ -185,11 +184,6 @@ def download_youtube_to_mp3(
         "no_warnings": True,
         "download_archive": str(archive_file),
         "ignoreerrors": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "web"],
-            }
-        },
         "progress_hooks": [progress_hook],
     }
 
@@ -202,6 +196,14 @@ def download_youtube_to_mp3(
             "download_archive": str(output_dir / ".download_archive_mp4.txt"),
             "progress_hooks": [video_progress_hook],
         })
+
+    if retry:
+        ydl_opts.update(
+            download_archive=None,
+            overwrites=True,
+            continuedl=False,
+            ignoreerrors=False,
+        )
 
     print(f"\n==================================================")
     print(f"🔗 링크: {url}")
@@ -217,6 +219,9 @@ def download_youtube_to_mp3(
             # download=True로 한 번에 추출 및 다운로드 진행 (이중 요청 방지 및 403 우회)
             info = ydl.extract_info(url, download=True)
             if not info:
+                if retry:
+                    print("⚠️ 다운로드하지 못했어요. 링크를 확인하고 다시 시도해 주세요.")
+                    return False
                 print("ℹ️ 이미 다운로드된 영상이거나 건너뛴 영상입니다.")
                 return True
 
@@ -232,7 +237,7 @@ def download_youtube_to_mp3(
         return True
 
     except Exception as e:
-        print(f"\n❌ 다운로드 중 오류가 발생했습니다: {e}\n")
+        print(f"\n❌ 다운로드 중 문제가 생겼어요. 다시 시도해 주세요.\n{e}\n")
         return False
 
 
@@ -243,6 +248,8 @@ def download_multiple_links(
     allow_playlist: bool = False,
     source_file: Optional[Path] = None,
     option: Optional[str] = None,
+    *,
+    retry: bool = False,
 ) -> int:
     """
     여러 YouTube 링크를 순차적으로 다운로드합니다.
@@ -261,6 +268,7 @@ def download_multiple_links(
             quality=quality,
             allow_playlist=allow_playlist,
             option=option,
+            retry=retry,
         )
         if success:
             successful_links.append(url)
@@ -275,7 +283,9 @@ def download_multiple_links(
     return len(successful_links)
 
 
-def interactive_mode(output_dir: Path, quality: str = "192", option: Optional[str] = None):
+def interactive_mode(
+    output_dir: Path, quality: str = "192", option: Optional[str] = None, *, retry: bool = False
+):
     """
     직접 콘솔에서 링크를 입력받아 반복 다운로드하는 대화형 모드입니다.
     """
@@ -300,7 +310,9 @@ def interactive_mode(output_dir: Path, quality: str = "192", option: Optional[st
             print("\n👋 프로그램을 종료합니다.")
             break
 
-        download_youtube_to_mp3(url_input, output_dir=output_dir, quality=quality, option=option)
+        download_youtube_to_mp3(
+            url_input, output_dir=output_dir, quality=quality, option=option, retry=retry
+        )
 
 
 def main():
@@ -341,6 +353,11 @@ def main():
         choices=["mp4", "mp4_only"],
         help="mp4: MP4와 MP3를 모두 다운로드해요. mp4_only: MP4만 다운로드해요. 생략하면 MP3만 다운로드해요.",
     )
+    parser.add_argument(
+        "--retry",
+        action="store_true",
+        help="완료한 링크도 다시 다운로드해요. 같은 이름의 파일은 덮어써요.",
+    )
 
     args = parser.parse_args()
     target_output_dir = Path(args.output)
@@ -351,7 +368,7 @@ def main():
         if not file_path.exists():
             print(f"❌ 파일을 찾을 수 없습니다: {file_path.resolve()}")
             return
-        links = load_links_from_file(file_path)
+        links = load_links_from_file(file_path, retry=args.retry)
         if not links:
             print(f"⚠️ {file_path.name} 파일에 유효한 링크가 없습니다.")
             return
@@ -362,6 +379,7 @@ def main():
             allow_playlist=args.playlist,
             option=args.option,
             source_file=file_path,
+            retry=args.retry,
         )
         return
 
@@ -373,12 +391,13 @@ def main():
             quality=args.quality,
             allow_playlist=args.playlist,
             option=args.option,
+            retry=args.retry,
         )
         return
 
     # 3. 인자가 없는 경우: link.txt 확인
     if DEFAULT_LINK_FILE.exists():
-        links_in_file = load_links_from_file(DEFAULT_LINK_FILE)
+        links_in_file = load_links_from_file(DEFAULT_LINK_FILE, retry=args.retry)
         if links_in_file:
             print("\n" + "=" * 55)
             print("🎵  YouTube to MP3 다운로더  🎵")
@@ -398,12 +417,15 @@ def main():
                 allow_playlist=args.playlist,
                 option=args.option,
                 source_file=DEFAULT_LINK_FILE,
+                retry=args.retry,
             )
             return
 
     # 4. link.txt에 유효한 링크가 없는 경우: 직접 입력 대화형 모드로 실행
     print("\nℹ️ 'link.txt'에 다운로드할 링크가 없습니다.")
-    interactive_mode(output_dir=target_output_dir, quality=args.quality, option=args.option)
+    interactive_mode(
+        output_dir=target_output_dir, quality=args.quality, option=args.option, retry=args.retry
+    )
 
 
 if __name__ == "__main__":
