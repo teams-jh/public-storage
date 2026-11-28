@@ -17,3 +17,4 @@ def load_macro_settings(name: str) -> dict:
 
 
 POST_SUBMIT_CONFIG = load_macro_settings("MACRO_POST_SUBMIT_CONFIG")
+YOUTUBE_BROWSER_CONFIG = load_macro_settings("YOUTUBE_BROWSER_CONFIG")

@@ -506,3 +506,71 @@ export const AUTO_BULK_UPLOAD_CONFIG = {
     }
   }
 } as const;
+
+/**
+ * profile_directory는 계정별 세션 경로 아래의 Chromium 프로필 폴더 이름이에요.
+ * 바꾸면 YouTube 업로드와 재생목록 정리가 새 폴더를 열어 다시 로그인해야 할 수 있어요.
+ * launch_args는 Chromium에 넘기는 시작 옵션 문자열 목록이에요. 바꾸면 브라우저의 시작 동작이 바뀌어요.
+ */
+export const YOUTUBE_BROWSER_CONFIG = {
+  "profile_directory": "browser_youtube",
+  "launch_args": ["--disable-blink-features=AutomationControlled", "--start-maximized"]
+} as const;
+
+/**
+ * studio_origin과 playlist_path_pattern, channel_playlists_path_pattern은 허용할 Studio 출처와
+ * 개별 재생목록 동영상 탭·채널 재생목록 목록 경로(정규식)예요.
+ * channel_playlist_link_pattern은 목록의 Studio 링크에서 재생목록 ID를 찾는 정규식이에요.
+ * public_playlist_hosts는 목록에 공개 재생목록 주소가 있을 때 허용하는 YouTube 호스트 이름 목록이에요.
+ * playlist_videos_path_template은 찾은 ID를 동영상 탭 경로로 바꾸는 형식 문자열이에요.
+ * 바꾸면 입력할 수 있는 주소의 범위가 달라져요. login_host는 로그인을 기다릴 Google 호스트 이름이에요.
+ * login_timeout_ms는 수동 로그인, ui_timeout_ms는 목록 표시·제거·페이지 이동 대기 한도예요(단위: ms).
+ * 값을 늘리면 느린 접속을 더 오래 기다려요. poll_interval_ms는 화면 확인 간격(단위: ms)이며
+ * 줄이면 변경을 빨리 감지하지만 브라우저 검사 횟수가 늘어요.
+ * page_settle_ms는 페이지 이동과 영상 제거 후에 목록·범위·마지막 페이지 상태가 안정되기를 기다리는 시간(단위: ms)이에요.
+ * 값을 늘리면 늦게 바뀌는 목록이나 페이지 버튼을 더 오래 기다려요.
+ * removal_notice_clear_ms는 직전 제거 알림이 화면에서 사라지기를 기다리는 최대 시간(단위: ms)이에요.
+ * 값을 늘리면 같은 영상이 즉시 채워지는 경우에도 이전 알림과 새 알림을 구분하기 쉬워져요.
+ * playlist_item_id_attributes는 Studio 행이나 제목 링크에 있는 재생목록 항목 식별 속성 이름 목록이에요.
+ * 값을 바꾸면 같은 영상의 여러 항목을 구분할 때 읽는 HTML 속성이 달라져요.
+ * selectors는 영상 행·제목·채널 재생목록 링크·페이지 이동·행 메뉴·제거 항목을 찾는 CSS 선택자와,
+ * 한국어·영어 화면 문구를 찾는 정규식이에요. Studio 화면이 바뀌면 여기에 맞춰 조정해요.
+ * Python에서도 읽으므로 객체 내부는 주석과 후행 쉼표 없이 JSON 문법을 유지해요.
+ */
+export const YOUTUBE_PLAYLIST_DEDUPE_CONFIG = {
+  "studio_origin": "https://studio.youtube.com",
+  "playlist_path_pattern": "/playlist/[A-Za-z0-9_-]+/videos/?",
+  "channel_playlists_path_pattern": "/channel/[A-Za-z0-9_-]+/content/playlists/?",
+  "channel_playlist_link_pattern": "/playlist/([A-Za-z0-9_-]+)(?:/(?:edit|videos|details|analytics|translations))?/?",
+  "public_playlist_hosts": ["www.youtube.com", "youtube.com", "m.youtube.com"],
+  "playlist_videos_path_template": "/playlist/{playlist_id}/videos",
+  "login_host": "accounts.google.com",
+  "login_timeout_ms": 180000,
+  "ui_timeout_ms": 30000,
+  "poll_interval_ms": 150,
+  "page_settle_ms": 900,
+  "removal_notice_clear_ms": 6000,
+  "playlist_item_id_attributes": ["data-playlist-item-id", "playlist-item-id", "data-set-video-id", "set-video-id", "data-playlist-set-video-id", "playlist-set-video-id"],
+  "selectors": {
+    "row": "ytcp-playlist-video-row, ytcp-playlist-video-list-item, ytcp-playlist-video-list-row, ytcp-playlist-video-item, ytcp-video-playlist-row, ytcp-video-row, [role='row'], tr",
+    "title": "#video-title, #video-title-link, a#title, .video-title",
+    "video_link": "a[href*='/video/'], a[href*='/watch?'], a[href*='/shorts/'], a[href*='youtu.be/']",
+    "channel_playlist_link": ":is(ytcp-playlist-row, ytcp-playlist-list-row, [role='row'], tr, ytcp-playlist-section, ytcp-playlist-list, ytcp-content-section, main, [role='main']) :is(a[href^='/playlist/'], a[href*='studio.youtube.com/playlist/'], a[href*='youtube.com/playlist?'][href*='list='])",
+    "channel_empty_text": "^(?:No (?:matching )?playlists(?: found)?|There are no playlists|You (?:have no playlists|haven['’]t created any playlists(?: yet)?)|재생목록이 (?:없습니다|없어요)|재생목록 없음|(?:일치하는|아직 만든) 재생목록이 (?:없습니다|없어요))[.!]?$",
+    "next": "#navigate-after, #navigate-after-button, #next-page, #next-page-button, ytcp-pagination #next-button, [rel='next']",
+    "next_text": "^(?:(?:Go to |Navigate to )?(?:the )?next(?: page)?|다음(?: 페이지(?:로)?(?: 이동| 보기| 가기)?)?)(?:\\s*\\([^)]*\\))?$",
+    "pagination": "ytcp-pagination, ytcp-paginator, #pagination, #page-info, #pagination-info, #page-range, [aria-label='Pagination'], [aria-label='페이지 탐색']",
+    "pagination_loading": "ytcp-pagination[aria-busy='true'], main[aria-busy='true'], :is(ytcp-playlist-video-list, ytcp-playlist-list, ytcp-playlist-section)[aria-busy='true'], :is(ytcp-playlist-video-list, ytcp-playlist-list, ytcp-playlist-section) tp-yt-paper-spinner[active]",
+    "menu": "#options-menu, #options-menu-button, #overflow-menu, #overflow-menu-button, #more-options, #action-menu-button, #menu-button, [aria-haspopup='menu']",
+    "menu_text": "^(?:More(?: actions| options)?|Options|Actions|더\\s*보기|옵션|작업)\\s*$",
+    "direct_remove": "^\\s*(?:(?:Remove|Delete) from (?:this |the )?playlist|(?:이 )?재생목록에서 (?:동영상 )?(?:제거|삭제)(?:하기)?)[\\s.…]*$",
+    "menu_item": "[role='menuitem'], tp-yt-paper-item, ytcp-menu-service-item, yt-list-item-view-model",
+    "remove_dialog": "[role='dialog'], tp-yt-paper-dialog[opened], ytcp-confirmation-dialog",
+    "remove_dialog_text": "(?:\\b(?:remove|delete)\\b[\\s\\S]*?\\bfrom (?:this |the )?playlist\\b|재생목록에서[\\s\\S]*?(?:제거|삭제|제외))",
+    "remove_confirm_button": "button, [role='button'], ytcp-button, tp-yt-paper-button",
+    "confirm_text": "^(?:Remove(?: video)?|Delete(?: video)?|Confirm|제거(?:하기)?|삭제(?:하기)?|제외(?:하기)?|확인)$",
+    "removal_notice": "ytcp-toast, tp-yt-paper-toast, [role='status'], [role='alert'], [aria-live='polite'], [aria-live='assertive']",
+    "removal_notice_text": "(?:\\b(?:removed|deleted) from (?:this |the )?playlist\\b|^\\s*(?:Video removed|동영상(?:을|이)?\\s*(?:삭제|제거)(?:됨|했어요|했습니다|되었어요|되었습니다))[\\s.!]*(?:Undo|실행\\s*취소)?\\s*$|재생목록에서[\\s\\S]*?(?:(?:삭제|제거|제외)\\s*(?:했|됐|됨|되었)|뺐어요))",
+    "empty_text": "^(?:No videos(?: in (?:this|the) playlist)?|This playlist (?:is empty|has no videos)|재생목록에 동영상이 없어요|(?:이 )?재생목록에 동영상이 없습니다|동영상이 (?:없습니다|없어요))[.!]?$"
+  }
+} as const;

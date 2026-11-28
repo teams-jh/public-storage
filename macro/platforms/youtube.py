@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import timezone
 from pathlib import Path
 from platforms.base import BaseUploader
+from global_constants import YOUTUBE_BROWSER_CONFIG
 from upload_pause import upload_monotonic
 from platforms.scheduling import (
     choose_calendar_date,
@@ -34,10 +35,7 @@ class YouTubeUploader(BaseUploader):
                 user_data_dir=str(user_data_dir),
                 headless=False,
                 no_viewport=True,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--start-maximized",
-                ],
+                args=YOUTUBE_BROWSER_CONFIG["launch_args"],
             )
             state = {"succeeded": False}
             try:
@@ -483,7 +481,7 @@ class YouTubeUploader(BaseUploader):
 
     def _upload_via_playwright(self, video_path: Path, title: str, description: str, scheduled_at=None) -> bool:
         try:
-            user_data_dir = SESSION_DIR / "browser_youtube"
+            user_data_dir = SESSION_DIR / YOUTUBE_BROWSER_CONFIG["profile_directory"]
             user_data_dir.mkdir(exist_ok=True)
 
             size_mb = get_media_size_mb(video_path)
