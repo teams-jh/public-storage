@@ -464,6 +464,46 @@ class InstagramUploader(BaseUploader):
         self.logger.info(f"Instagram 최종 버튼 클릭 완료: {result.get('text')}")
         return True
 
+    def _wait_for_post_completion(self, page, scheduled: bool) -> bool:
+        """최종 버튼을 누른 뒤 설정된 시간 동안 브라우저를 열어둬요."""
+        completed = False
+        for _, deadline in self.submission_checks(page, "Instagram 업로드 완료 확인"):
+            if completed:
+                continue
+            try:
+                completed = page.evaluate("""scheduled => {
+                    const notices = document.querySelectorAll(
+                        "[role='dialog'], [role='alert'], [role='status'], [aria-live]"
+                    );
+                    const messages = scheduled
+                        ? ["예약되었습니다", "예약되었어요", "has been scheduled"]
+                        : ["공유되었습니다", "공유됐어요", "Your post has been shared", "Your reel has been shared"];
+                    const match = Array.from(notices).some(notice => {
+                        if (!notice.getClientRects().length || getComputedStyle(notice).visibility !== "visible") {
+                            return false;
+                        }
+                        const text = notice.innerText || "";
+                        return messages.some(message => text.includes(message));
+                    });
+                    if (match || !scheduled) return match;
+
+                    // 예약 완료 알림에 역할 속성이 없는 경우도 확인해요.
+                    const bodyText = document.body?.innerText || "";
+                    return ["게시물이 예약되었습니다", "콘텐츠가 예약되었습니다", "예약되었어요", "has been scheduled"]
+                        .some(message => bodyText.includes(message));
+                }""", scheduled)
+            except Exception:
+                continue
+
+            if completed:
+                result_name = "예약 등록" if scheduled else "공유"
+                self.logger.info(f"Instagram {result_name} 완료를 확인했어요. 남은 대기 시간 동안 창을 열어둬요.")
+                self.save_result_screenshot(page, "scheduled" if scheduled else "uploaded", deadline=deadline)
+
+        if not completed:
+            self.logger.warning("Instagram 업로드 완료를 확인하지 못했어요. 다시 올리기 전에 게시물을 확인해 주세요.")
+        return completed
+
     def upload(self, media_path: Path, metadata: dict) -> bool:
         """
         Instagram 릴스/사진/GIF 업로드
@@ -899,56 +939,9 @@ class InstagramUploader(BaseUploader):
                         browser.close()
                         return False
 
-                    # 5. 실제 업로드 완료 엄격 검증 (오직 업로드 모달 내부에서 확인)
-                    for _, deadline in self.submission_checks(page, "Instagram 업로드 완료 확인"):
-                        # 업로드 모달(div[role='dialog']) 내부의 텍스트만 엄격하게 검사
-                        is_completed = False
-                        try:
-                            is_completed = page.evaluate("""() => {
-                                const dialogs = Array.from(document.querySelectorAll("div[role='dialog']"));
-                                const bodyText = document.body.innerText || "";
-                                if (
-                                    bodyText.includes("게시물이 예약되었습니다") ||
-                                    bodyText.includes("콘텐츠가 예약되었습니다") ||
-                                    bodyText.includes("예약되었어요") ||
-                                    bodyText.includes("has been scheduled")
-                                ) {
-                                    return true;
-                                }
-                                for (const dialog of dialogs) {
-                                    const text = dialog.innerText || "";
-                                    // 오직 모달 내부에서 완료 문구가 명확히 떴을 때만 감지
-                                    if (
-                                        text.includes("게시물이 공유되었습니다") ||
-                                        text.includes("동영상이 공유되었습니다") ||
-                                        text.includes("릴스가 공유되었습니다") ||
-                                        text.includes("Your post has been shared") ||
-                                        text.includes("Your reel has been shared") ||
-                                        text.includes("예약되었습니다") ||
-                                        text.includes("예약되었어요") ||
-                                        text.includes("has been scheduled") ||
-                                        (text.includes("공유되었습니다") && !text.includes("공유하기"))
-                                    ) {
-                                        return true;
-                                    }
-                                }
-                                return dialogs.length === 0;
-                            }""")
-                        except Exception:
-                            pass
-
-                        if is_completed:
-                            result_name = "예약 등록" if scheduled_at else "공유"
-                            self.logger.info(f"Instagram {result_name} 완료를 확인했어요.")
-                            self.save_result_screenshot(
-                                page, "scheduled" if scheduled_at else "uploaded", deadline=deadline
-                            )
-                            browser.close()
-                            return True
-
-                    self.logger.warning("Instagram 업로드 완료를 확인하지 못했어요. 다시 올리기 전에 게시물을 확인해 주세요.")
+                    completed = self._wait_for_post_completion(page, scheduled=bool(scheduled_at))
                     browser.close()
-                    return False
+                    return completed
 
 
 

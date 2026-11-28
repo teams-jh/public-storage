@@ -419,6 +419,7 @@ export const MAKE_TOTAL_MERGE_LYRICS_CONFIG = {
  * Threads, Instagram, TikTok, 네이버 클립의 웹 게시·예약 요청 뒤 완료 확인 설정이에요.
  * timeout_seconds는 기본 확인 제한 시간(초), platform_timeout_seconds는 플랫폼별 확인 제한 시간(초)이에요.
  * 값을 늘리면 느린 완료 화면도 더 오래 확인하고, 다음 작업을 시작하기까지 더 오래 걸릴 수 있어요.
+ * Instagram은 완료를 먼저 확인해도 버튼을 누른 뒤 설정 시간까지 브라우저를 열어둬요.
  * poll_interval_ms는 화면 확인 간격(ms)이며, 줄이면 완료를 더 빨리 감지하고 화면 검사 횟수가 늘어요.
  * Python에서도 읽으므로 객체 내부는 주석과 후행 쉼표 없이 JSON 문법을 유지해요.
  */
